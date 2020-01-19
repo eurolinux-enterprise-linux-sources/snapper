@@ -1,10 +1,10 @@
 Name:		snapper
 Version:	0.1.7
-Release:	6%{?dist}
+Release:	7%{?dist}
 License:	GPLv2
 Group:		Applications/System
 BuildRequires:	boost-devel gettext libtool libxml2-devel dbus-devel
-BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.12
+BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.16.1
 BuildRequires:	libselinux-devel libacl-devel
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 Requires:	diffutils%{?_isa}
@@ -21,6 +21,8 @@ patch5:		%{name}-manpages-remove-invalid-references.patch
 patch6:		%{name}-0.2.2-add-norecovery-option-xfs.patch
 patch7:		%{name}-0.2.2-fix-acl-revert-xfs.patch
 patch8:		%{name}-add-selinux-restorecon-support.patch
+patch9:		%{name}-0.2.2-fixed-empty-pre-post-cleanup-algorithm.patch
+patch10:	%{name}-0.2.4-add-conditionals-for-btrfs-library-versions.patch
 
 %description
 This package contains snapper, a tool for filesystem snapshot management.
@@ -28,7 +30,7 @@ This package contains snapper, a tool for filesystem snapshot management.
 %package libs
 Summary:	Library for filesystem snapshot management
 Group:		System Environment/Libraries
-Requires:	util-linux%{?_isa} btrfs-progs%{?_isa} >= 3.12 libselinux%{?_isa}
+Requires:	util-linux%{?_isa} btrfs-progs%{?_isa} >= 3.16.1 libselinux%{?_isa}
 Requires:	libacl%{?_isa}
 
 %description libs
@@ -64,6 +66,8 @@ A PAM module for calling snapper during user login and logout.
 %patch6 -p1
 %patch7 -p1
 %patch8 -p1
+%patch9 -p1
+%patch10 -p1
 
 %build
 aclocal
@@ -127,6 +131,11 @@ rm -f %{buildroot}/%{_libdir}/security/*.la
 %doc %{_mandir}/*/pam_snapper*.*
 
 %changelog
+* Mon Sep 29 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-7
+- patch: fix empty-pre-post cleanup algorithm
+- patch: add conditionals for btrfs library versions
+- Resolves: #1071973 #1142954
+
 * Wed Feb 26 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-6
 - patch: Add norecovery option mounting XFS read-only snapshot
 - patch: Fix ACL modification failure with XFS filesystem

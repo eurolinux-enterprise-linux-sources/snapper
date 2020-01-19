@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -29,6 +29,7 @@
 #include <fnmatch.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <locale>
 #include <boost/algorithm/string.hpp>
 
 #include "snapper/File.h"
@@ -40,6 +41,7 @@
 #include "snapper/Compare.h"
 #include "snapper/Exception.h"
 #include "snapper/XAttributes.h"
+#include "snapper/Acls.h"
 
 
 namespace snapper
@@ -71,33 +73,34 @@ namespace snapper
     }
 
 
-    struct FilterHelper
-    {
-	FilterHelper(const vector<string>& patterns)
-	    : patterns(patterns) {}
-	bool operator()(const File& file)
-	    {
-		for (vector<string>::const_iterator it = patterns.begin(); it != patterns.end(); ++it)
-		    if (fnmatch(it->c_str(), file.getName().c_str(), FNM_LEADING_DIR) == 0)
-			return true;
-		return false;
-	    }
-	const vector<string>& patterns;
-    };
-
-
     void
     Files::filter(const vector<string>& ignore_patterns)
     {
-	entries.erase(remove_if(entries.begin(), entries.end(), FilterHelper(ignore_patterns)),
-		      entries.end());
+	std::function<bool(const File&)> pred = [&ignore_patterns](const File& file) {
+	    for (const string& ignore_pattern : ignore_patterns)
+		if (fnmatch(ignore_pattern.c_str(), file.getName().c_str(), FNM_LEADING_DIR) == 0)
+		    return true;
+	    return false;
+	};
+
+	entries.erase(remove_if(entries.begin(), entries.end(), pred), entries.end());
     }
 
 
-    int
-    operator<(const File& a, const File& b)
+    bool
+    File::cmp_lt(const string& lhs, const string& rhs)
     {
-	return a.getName() < b.getName();
+	const std::collate<char>& c = std::use_facet<std::collate<char>>(std::locale());
+
+	return c.compare(lhs.c_str(), lhs.c_str() + lhs.length(),
+			 rhs.c_str(), rhs.c_str() + rhs.length()) < 0;
+    }
+
+
+    bool
+    operator<(const File& lhs, const File& rhs)
+    {
+	return File::cmp_lt(lhs.getName(), rhs.getName());
     }
 
 
@@ -109,16 +112,16 @@ namespace snapper
 
 
     bool
-    file_name_less(const File& file, const string& name)
+    operator<(const File& file, const string& name)
     {
-	return file.getName() < name;
+	return File::cmp_lt(file.getName(), name);
     }
 
 
     Files::iterator
     Files::find(const string& name)
     {
-	iterator ret = lower_bound(entries.begin(), entries.end(), name, file_name_less);
+	iterator ret = lower_bound(entries.begin(), entries.end(), name);
 	return (ret != end() && ret->getName() == name) ? ret : end();
     }
 
@@ -126,7 +129,7 @@ namespace snapper
     Files::const_iterator
     Files::find(const string& name) const
     {
-	const_iterator ret = lower_bound(entries.begin(), entries.end(), name, file_name_less);
+	const_iterator ret = lower_bound(entries.begin(), entries.end(), name);
 	return (ret != end() && ret->getName() == name) ? ret : end();
     }
 
@@ -333,16 +336,16 @@ namespace snapper
 	    }
 	}
 
-	if (chmod(getAbsolutePath(LOC_SYSTEM).c_str(), mode) != 0)
+	if (chown(getAbsolutePath(LOC_SYSTEM).c_str(), owner, group) != 0)
 	{
-	    y2err("chmod failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" << errno <<
+	    y2err("chown failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" << errno <<
 		  " (" << stringerror(errno) << ")");
 	    return false;
 	}
 
-	if (chown(getAbsolutePath(LOC_SYSTEM).c_str(), owner, group) != 0)
+	if (chmod(getAbsolutePath(LOC_SYSTEM).c_str(), mode) != 0)
 	{
-	    y2err("chown failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" << errno <<
+	    y2err("chmod failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" << errno <<
 		  " (" << stringerror(errno) << ")");
 	    return false;
 	}
@@ -370,19 +373,19 @@ namespace snapper
 	    return false;
 	}
 
-	int r1 = fchmod(dest_fd, mode);
+	int r1 = fchown(dest_fd, owner, group);
 	if (r1 != 0)
 	{
-	    y2err("fchmod failed errno:" << errno << " (" << stringerror(errno) << ")");
+	    y2err("fchown failed errno:" << errno << " (" << stringerror(errno) << ")");
 	    close(dest_fd);
 	    close(src_fd);
 	    return false;
 	}
 
-	int r2 = fchown(dest_fd, owner, group);
+	int r2 = fchmod(dest_fd, mode);
 	if (r2 != 0)
 	{
-	    y2err("fchown failed errno:" << errno << " (" << stringerror(errno) << ")");
+	    y2err("fchmod failed errno:" << errno << " (" << stringerror(errno) << ")");
 	    close(dest_fd);
 	    close(src_fd);
 	    return false;
@@ -503,23 +506,26 @@ namespace snapper
 		}
 	    }
 
-	    if (getPreToPostStatus() & PERMISSIONS)
-	    {
-		if (chmod(getAbsolutePath(LOC_SYSTEM).c_str(), fs.st_mode) != 0)
-		{
-		    y2err("chmod failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" <<
-			  errno << " (" << stringerror(errno) << ")");
-		    return false;
-		}
-	    }
-
-	    if (getPreToPostStatus() & (USER | GROUP))
+	    if (getPreToPostStatus() & (OWNER | GROUP))
 	    {
 		if (lchown(getAbsolutePath(LOC_SYSTEM).c_str(), fs.st_uid, fs.st_gid) != 0)
 		{
 		    y2err("lchown failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" <<
 			  errno <<  " (" << stringerror(errno) << ")");
 		    return false;
+		}
+	    }
+
+	    if (getPreToPostStatus() & (OWNER | GROUP | PERMISSIONS))
+	    {
+		if (!S_ISLNK(fs.st_mode))
+		{
+		    if (chmod(getAbsolutePath(LOC_SYSTEM).c_str(), fs.st_mode) != 0)
+		    {
+			y2err("chmod failed path:" << getAbsolutePath(LOC_SYSTEM) << " errno:" <<
+			      errno << " (" << stringerror(errno) << ")");
+			return false;
+		    }
 		}
 	    }
 	}
@@ -540,6 +546,8 @@ namespace snapper
             XAModification xa_mod(xa_src, xa_dest);
             y2deb("xa_modmap(xa_dest) object: " << xa_mod);
 
+	    xa_mod.filterOutAcls();
+
             xaCreated = xa_mod.getXaCreateNum();
             xaDeleted = xa_mod.getXaDeleteNum();
             xaReplaced = xa_mod.getXaReplaceNum();
@@ -555,6 +563,28 @@ namespace snapper
 
         return ret_val;
     }
+
+
+    bool
+    File::modifyAcls()
+    {
+	bool ret_val;
+
+	try
+	{
+	    Acls acl(getAbsolutePath(LOC_PRE));
+	    acl.serializeTo(getAbsolutePath(LOC_SYSTEM));
+
+	    ret_val = true;
+	}
+	catch (const AclException& e)
+	{
+	    ret_val = false;
+	}
+
+	return ret_val;
+    }
+
 
     XAUndoStatistic& operator+=(XAUndoStatistic &out, const XAUndoStatistic &src)
     {
@@ -611,7 +641,7 @@ namespace snapper
 		error = true;
 	}
 
-	if (getPreToPostStatus() & (CONTENT | PERMISSIONS | USER | GROUP))
+	if (getPreToPostStatus() & (CONTENT | PERMISSIONS | OWNER | GROUP))
 	{
 	    if (!modifyAllTypes())
 		error = true;
@@ -628,6 +658,12 @@ namespace snapper
             if (!modifyXattributes())
                 error = true;
         }
+
+        if (getPreToPostStatus() & (ACL | TYPE | DELETED))
+	{
+	    if (!modifyAcls())
+		error = true;
+	}
 #endif
 
 	pre_to_system_status = (unsigned int) -1;
@@ -711,6 +747,9 @@ namespace snapper
     string
     statusToString(unsigned int status)
     {
+	// If possible keep the characters in sync with e.g. rpm or
+	// rsync. Unfortunately rpm and rsync are not consistent.
+
 	string ret;
 
 	if (status & CREATED)
@@ -725,9 +764,10 @@ namespace snapper
 	    ret += ".";
 
 	ret += status & PERMISSIONS ? "p" : ".";
-	ret += status & USER ? "u" : ".";
+	ret += status & OWNER ? "u" : ".";
 	ret += status & GROUP ? "g" : ".";
-        ret += status & XATTRS ? "x" : ".";
+	ret += status & XATTRS ? "x" : ".";
+	ret += status & ACL ? "a" : ".";
 
 	return ret;
     }
@@ -758,7 +798,7 @@ namespace snapper
 	if (str.length() >= 3)
 	{
 	    if (str[2] == 'u')
-		ret |= USER;
+		ret |= OWNER;
 	}
 
 	if (str.length() >= 4)
@@ -768,10 +808,16 @@ namespace snapper
 	}
 
 	if (str.length() >= 5)
-        {
-            if (str[4] == 'x')
-                ret |= XATTRS;
-        }
+	{
+	    if (str[4] == 'x')
+		ret |= XATTRS;
+	}
+
+	if (str.length() >= 6)
+	{
+	    if (str[5] == 'a')
+		ret |= ACL;
+	}
 
 	return ret;
     }

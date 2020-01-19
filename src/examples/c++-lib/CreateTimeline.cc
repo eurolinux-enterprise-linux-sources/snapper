@@ -1,5 +1,7 @@
 
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
 #include <vector>
 #include <iostream>
 
@@ -12,7 +14,7 @@ using namespace std;
 void
 deleteAll()
 {
-    Snapper* sh = new Snapper("testsuite");
+    Snapper* sh = new Snapper("testsuite", "/");
 
     Snapshots snapshots = sh->getSnapshots();
 
@@ -33,14 +35,18 @@ main()
 {
     deleteAll();
 
-    Snapper* sh = new Snapper("testsuite");
+    Snapper* sh = new Snapper("testsuite", "/");
 
     time_t t = time(NULL) - 100 * 24*60*60;
     while (t < time(NULL))
     {
-	Snapshots::iterator snap = sh->createSingleSnapshot("testsuite");
+	SCD scd;
+	scd.uid = getuid();
+	scd.description = "testsuite";
+	scd.cleanup = "timeline";
+
+	Snapshots::iterator snap = sh->createSingleSnapshot(scd);
 	// snap->setDate(t);
-	snap->setCleanup("timeline");
 
 	t += 60*60;
     }

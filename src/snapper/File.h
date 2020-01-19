@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2012] Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -38,8 +38,16 @@ namespace snapper
 
     enum StatusFlags
     {
-	CREATED = 1, DELETED = 2, TYPE = 4, CONTENT = 8, PERMISSIONS = 16, USER = 32,
-	GROUP = 64, XATTRS = 128
+	CREATED = 1,		// created
+	DELETED = 2,		// deleted
+	TYPE = 4,		// type has changed
+	CONTENT = 8, 		// content has changed
+	PERMISSIONS = 16,	// permissions have changed, see chmod(2)
+	OWNER = 32,		// owner has changed, see chown(2)
+	USER = 32,		// deprecated - alias for OWNER
+	GROUP = 64,		// group has changed, see chown(2)
+	XATTRS = 128,		// extended attributes changed, see attr(5)
+	ACL = 256		// access control list changed, see acl(5)
     };
 
     enum Cmp
@@ -132,6 +140,9 @@ namespace snapper
 
 	XAUndoStatistic getXAUndoStatistic() const;
 
+	// C++ locale aware less-than comparison
+	static bool cmp_lt(const string& lhs, const string& rhs);
+
     private:
 
 	bool createParentDirectories(const string& path) const;
@@ -156,6 +167,7 @@ namespace snapper
 	bool undo;
 
 	bool modifyXattributes();
+	bool modifyAcls();
 
 	unsigned int xaCreated;
 	unsigned int xaDeleted;

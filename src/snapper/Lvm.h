@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2014] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -78,9 +78,10 @@ namespace snapper
     {
     public:
 
-	static Filesystem* create(const string& fstype, const string& subvolume);
+	static Filesystem* create(const string& fstype, const string& subvolume,
+				  const string& root_prefix);
 
-	Lvm(const string& subvolume, const string& mount_type);
+	Lvm(const string& subvolume, const string& root_prefix, const string& mount_type);
 
 	virtual string fstype() const { return "lvm(" + mount_type + ")"; }
 
@@ -93,12 +94,15 @@ namespace snapper
 	virtual SDir openInfosDir() const;
 	virtual SDir openSnapshotDir(unsigned int num) const;
 
-	virtual void createSnapshot(unsigned int num) const;
+	virtual void createSnapshot(unsigned int num, unsigned int num_parent,
+				    bool read_only) const;
 	virtual void deleteSnapshot(unsigned int num) const;
 
 	virtual bool isSnapshotMounted(unsigned int num) const;
 	virtual void mountSnapshot(unsigned int num) const;
 	virtual void umountSnapshot(unsigned int num) const;
+
+	virtual bool isSnapshotReadOnly(unsigned int num) const;
 
 	virtual bool checkSnapshot(unsigned int num) const;
 

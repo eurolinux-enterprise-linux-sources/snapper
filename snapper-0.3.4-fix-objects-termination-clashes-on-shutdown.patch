@@ -1,0 +1,166 @@
+diff -rupN snapper-0.2.8.old/server/Background.cc snapper-0.2.8/server/Background.cc
+--- snapper-0.2.8.old/server/Background.cc	2016-08-10 14:05:02.400639168 +0200
++++ snapper-0.2.8/server/Background.cc	2016-08-10 14:05:43.316682291 +0200
+@@ -31,9 +31,6 @@
+ #include "Background.h"
+ 
+ 
+-Backgrounds backgrounds;
+-
+-
+ Backgrounds::Backgrounds()
+ {
+ }
+diff -rupN snapper-0.2.8.old/server/Background.h snapper-0.2.8/server/Background.h
+--- snapper-0.2.8.old/server/Background.h	2016-08-10 14:05:02.400639168 +0200
++++ snapper-0.2.8/server/Background.h	2016-08-10 14:05:43.316682291 +0200
+@@ -75,7 +75,4 @@ private:
+ };
+ 
+ 
+-extern Backgrounds backgrounds;
+-
+-
+ #endif
+diff -rupN snapper-0.2.8.old/server/Client.cc snapper-0.2.8/server/Client.cc
+--- snapper-0.2.8.old/server/Client.cc	2016-08-10 14:05:25.602663621 +0200
++++ snapper-0.2.8/server/Client.cc	2016-08-10 14:05:43.316682291 +0200
+@@ -36,11 +36,9 @@
+ 
+ boost::shared_mutex big_mutex;
+ 
+-Clients clients;
+ 
+-
+-Client::Client(const string& name)
+-    : name(name), zombie(false)
++Client::Client(const string& name, const Clients& clients)
++    : name(name), zombie(false), clients(clients)
+ {
+ }
+ 
+@@ -1045,7 +1043,7 @@ Client::create_post_snapshot(DBus::Conne
+     bool background_comparison = true;
+     it->getConfigInfo().getValue("BACKGROUND_COMPARISON", background_comparison);
+     if (background_comparison)
+-	backgrounds.add_task(it, snap1, snap2);
++	clients.backgrounds().add_task(it, snap1, snap2);
+ 
+     DBus::MessageMethodReturn reply(msg);
+ 
+@@ -1420,7 +1418,7 @@ Client::debug(DBus::Connection& conn, DB
+     }
+ 
+     hoho << "backgrounds:";
+-    for (Backgrounds::const_iterator it = backgrounds.begin(); it != backgrounds.end(); ++it)
++    for (Backgrounds::const_iterator it = clients.backgrounds().begin(); it != clients.backgrounds().end(); ++it)
+     {
+ 	std::ostringstream s;
+ 	s << "    name:'" << it->meta_snapper->configName() << "'";
+@@ -1701,6 +1699,19 @@ Client::worker()
+ }
+ 
+ 
++Clients::Clients(Backgrounds& backgrounds)
++    : bgs(backgrounds)
++{
++}
++
++
++Backgrounds&
++Clients::backgrounds() const
++{
++    return bgs;
++}
++
++
+ Clients::iterator
+ Clients::find(const string& name)
+ {
+@@ -1717,7 +1728,7 @@ Clients::add(const string& name)
+ {
+     assert(find(name) == entries.end());
+ 
+-    entries.emplace_back(name);
++    entries.emplace_back(name, *this);
+ 
+     return --entries.end();
+ }
+diff -rupN snapper-0.2.8.old/server/Client.h snapper-0.2.8/server/Client.h
+--- snapper-0.2.8.old/server/Client.h	2016-08-10 14:05:25.602663621 +0200
++++ snapper-0.2.8/server/Client.h	2016-08-10 14:11:41.789061572 +0200
+@@ -52,6 +52,9 @@ using namespace snapper;
+ 
+ extern boost::shared_mutex big_mutex;
+ 
++class Backgrounds;
++class Clients;
++
+ 
+ struct NoComparison : public std::exception
+ {
+@@ -112,7 +115,7 @@ public:
+ 
+     void dispatch(DBus::Connection& conn, DBus::Message& msg);
+ 
+-    Client(const string& name);
++    Client(const string& name, const Clients& clients);
+     ~Client();
+ 
+     list<XComparison*>::iterator find_comparison(Snapper* snapper, unsigned int number1,
+@@ -168,12 +171,15 @@ private:
+     void worker();
+     void files_transfer_worker();
+ 
++    const Clients& clients;
++
+ };
+ 
+ 
+ class Clients
+ {
+ public:
++    Clients(Backgrounds& backgrounds);
+ 
+     typedef list<Client>::iterator iterator;
+     typedef list<Client>::const_iterator const_iterator;
+@@ -193,14 +199,15 @@ public:
+ 
+     bool has_zombies() const;
+ 
++    Backgrounds& backgrounds() const;
++
+ private:
+ 
+     list<Client> entries;
+ 
+-};
+-
++    Backgrounds& bgs;
+ 
+-extern Clients clients;
++};
+ 
+ 
+ #endif
+diff -rupN snapper-0.2.8.old/server/snapperd.cc snapper-0.2.8/server/snapperd.cc
+--- snapper-0.2.8.old/server/snapperd.cc	2016-08-10 14:05:25.603663623 +0200
++++ snapper-0.2.8/server/snapperd.cc	2016-08-10 14:05:43.317682292 +0200
+@@ -58,11 +58,16 @@ public:
+     void periodic();
+     milliseconds periodic_timeout();
+ 
++private:
++
++    Backgrounds backgrounds;
++    Clients clients;
++
+ };
+ 
+ 
+ MyMainLoop::MyMainLoop(DBusBusType type)
+-    : MainLoop(type)
++    : MainLoop(type), backgrounds(), clients(backgrounds)
+ {
+ }
+ 

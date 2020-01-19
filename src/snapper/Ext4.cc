@@ -45,17 +45,17 @@ namespace snapper
 {
 
     Filesystem*
-    Ext4::create(const string& fstype, const string& subvolume)
+    Ext4::create(const string& fstype, const string& subvolume, const string& root_prefix)
     {
 	if (fstype == "ext4")
-	    return new Ext4(subvolume);
+	    return new Ext4(subvolume, root_prefix);
 
 	return NULL;
     }
 
 
-    Ext4::Ext4(const string& subvolume)
-	: Filesystem(subvolume)
+    Ext4::Ext4(const string& subvolume, const string& root_prefix)
+	: Filesystem(subvolume, root_prefix)
     {
 	if (access(CHSNAPBIN, X_OK) != 0)
 	{
@@ -164,8 +164,11 @@ namespace snapper
 
 
     void
-    Ext4::createSnapshot(unsigned int num) const
+    Ext4::createSnapshot(unsigned int num, unsigned int num_parent, bool read_only) const
     {
+	if (num_parent != 0 || !read_only)
+	    throw std::logic_error("not implemented");
+
 	SystemCmd cmd1(TOUCHBIN " " + quote(snapshotFile(num)));
 	if (cmd1.retcode() != 0)
 	    throw CreateSnapshotFailedException();
@@ -234,6 +237,15 @@ namespace snapper
 	    throw UmountSnapshotFailedException();
 
 	rmdir(snapshotDir(num).c_str());
+    }
+
+
+    bool
+    Ext4::isSnapshotReadOnly(unsigned int num) const
+    {
+	// TODO
+
+	return true;
     }
 
 

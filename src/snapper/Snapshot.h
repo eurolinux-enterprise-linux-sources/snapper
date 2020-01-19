@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -94,26 +94,20 @@ namespace snapper
 
 	time_t getDate() const { return date; }
 
-	void setUid(uid_t uid);
 	uid_t getUid() const { return uid; }
 
 	unsigned int getPreNum() const { return pre_num; }
 
-	void setDescription(const string& description);
-	string getDescription() const { return description; }
-
-	void setCleanup(const string& cleanup);
-	string getCleanup() const { return cleanup; }
-
-	void setUserdata(const map<string, string>& userdata);
-	map<string, string> getUserdata() const { return userdata; }
-
-	void flushInfo();
+	const string& getDescription() const { return description; }
+	const string& getCleanup() const { return cleanup; }
+	const map<string, string>& getUserdata() const { return userdata; }
 
 	string snapshotDir() const;
 
 	SDir openInfoDir() const;
 	SDir openSnapshotDir() const;
+
+	bool isReadOnly() const;
 
 	void mountFilesystemSnapshot(bool user_request) const;
 	void umountFilesystemSnapshot(bool user_request) const;
@@ -136,12 +130,8 @@ namespace snapper
 	unsigned int pre_num;	// valid only for type=POST
 
 	string description;	// likely empty for type=POST
-
 	string cleanup;
-
 	map<string, string> userdata;
-
-	bool info_modified;
 
 	mutable bool mount_checked;
 	mutable bool mount_user_request;
@@ -149,7 +139,8 @@ namespace snapper
 
 	void writeInfo() const;
 
-	void createFilesystemSnapshot() const;
+	void createFilesystemSnapshot(unsigned int num_parent, bool read_only) const;
+	void createFilesystemSnapshotOfDefault(bool read_only) const;
 	void deleteFilesystemSnapshot() const;
 
     };
@@ -159,6 +150,32 @@ namespace snapper
     {
 	return a.getNum() < b.getNum();
     }
+
+
+    // Snapshot Modify Data
+    class SMD
+    {
+    public:
+
+	SMD() : description(), cleanup(), userdata({}) {}
+
+	string description;
+	string cleanup;
+	map<string, string> userdata;
+
+    };
+
+    // Snapshot Create Data
+    class SCD : public SMD
+    {
+    public:
+
+	SCD() : SMD(), read_only(true), uid(0) {}
+
+	bool read_only;
+	uid_t uid;
+
+    };
 
 
     class Snapshots
@@ -200,11 +217,17 @@ namespace snapper
 
 	void check() const;
 
-	iterator createSingleSnapshot(string description);
-	iterator createPreSnapshot(string description);
-	iterator createPostSnapshot(string description, const_iterator pre);
+	void checkUserdata(const map<string, string>& userdata) const;
 
-	iterator createHelper(Snapshot& snapshot);
+	iterator createSingleSnapshot(const SCD& scd);
+	iterator createSingleSnapshot(const_iterator parent, const SCD& scd);
+	iterator createSingleSnapshotOfDefault(const SCD& scd);
+	iterator createPreSnapshot(const SCD& scd);
+	iterator createPostSnapshot(const_iterator pre, const SCD& scd);
+
+	iterator createHelper(Snapshot& snapshot, const_iterator parent, bool read_only);
+
+	void modifySnapshot(iterator snapshot, const SMD& smd);
 
 	void deleteSnapshot(iterator snapshot);
 

@@ -1,0 +1,71 @@
+From 2cf13874c6a3925f0cf9e09bd866e1f8d87f364b Mon Sep 17 00:00:00 2001
+From: Ondrej Kozina <okozina@redhat.com>
+Date: Fri, 12 Aug 2016 12:24:25 +0200
+Subject: [PATCH] replace getmntent with getmntent_r
+
+---
+ snapper/AppUtil.cc | 29 +++++++++++++++++++++--------
+ 1 file changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/snapper/AppUtil.cc b/snapper/AppUtil.cc
+index 9eb17d3..a1f944f 100644
+--- a/snapper/AppUtil.cc
++++ b/snapper/AppUtil.cc
+@@ -36,6 +36,7 @@
+ #include <mntent.h>
+ #include <boost/algorithm/string.hpp>
+ #include <boost/io/ios_state.hpp>
++#include <boost/scoped_array.hpp>
+ 
+ #include "snapper/Log.h"
+ #include "snapper/AppUtil.h"
+@@ -170,6 +171,14 @@ namespace snapper
+     }
+ 
+ 
++    unsigned
++    pagesize()
++    {
++	long r = sysconf(_SC_PAGESIZE);
++	return r < 0 ? 4096 : r;
++    }
++
++
+     bool
+     getMtabData(const string& mount_point, bool& found, MtabData& mtab_data)
+     {
+@@ -182,19 +191,23 @@ namespace snapper
+ 
+ 	found = false;
+ 
+-	struct mntent* m;
+-	while ((m = getmntent(f)))
++	struct mntent m;
++	// each mnt table element is limited to PAGE_SIZE top in Linux
++	unsigned buf_size = 4 * pagesize();
++	boost::scoped_array<char> buf(new char[buf_size]);
++
++	while (getmntent_r(f, &m, buf.get(), buf_size))
+ 	{
+-	    if (strcmp(m->mnt_type, "rootfs") == 0)
++	    if (strcmp(m.mnt_type, "rootfs") == 0)
+ 		continue;
+ 
+-	    if (m->mnt_dir == mount_point)
++	    if (m.mnt_dir == mount_point)
+ 	    {
+ 		found = true;
+-		mtab_data.device = m->mnt_fsname;
+-		mtab_data.dir = m->mnt_dir;
+-		mtab_data.type = m->mnt_type;
+-		boost::split(mtab_data.options, m->mnt_opts, boost::is_any_of(","),
++		mtab_data.device = m.mnt_fsname;
++		mtab_data.dir = m.mnt_dir;
++		mtab_data.type = m.mnt_type;
++		boost::split(mtab_data.options, m.mnt_opts, boost::is_any_of(","),
+ 			     boost::token_compress_on);
+ 		break;
+ 	    }
+-- 
+2.7.4
+

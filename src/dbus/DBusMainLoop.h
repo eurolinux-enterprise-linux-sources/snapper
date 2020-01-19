@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Novell, Inc.
+ * Copyright (c) [2012-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -25,12 +25,16 @@
 
 
 #include <dbus/dbus.h>
+#include <chrono>
 
 #include "DBusConnection.h"
 
 
 namespace DBus
 {
+
+    using namespace std::chrono;
+
 
     class MainLoop : public Connection
     {
@@ -41,7 +45,7 @@ namespace DBus
 
 	void run();
 
-	void set_idle_timeout(int s);
+	void set_idle_timeout(milliseconds idle_timeout);
 	void reset_idle_count();
 
 	void add_client_match(const string& name);
@@ -50,25 +54,28 @@ namespace DBus
 	virtual void method_call(Message& message) = 0;
 	virtual void signal(Message& message) = 0;
 	virtual void client_disconnected(const string& name) = 0;
-	virtual int periodic_timeout() = 0;
+	virtual milliseconds periodic_timeout() = 0;
 	virtual void periodic() = 0;
 
     private:
 
 	struct Watch
 	{
+	    Watch(DBusWatch* dbus_watch);
+
+	    DBusWatch* dbus_watch;
 	    bool enabled;
 	    int fd;
-	    unsigned int flags;
-	    int events;
-	    DBusWatch* dbus_watch;
+	    short events;
 	};
 
 	struct Timeout
 	{
+	    Timeout(DBusTimeout* dbus_timeout);
+
+	    DBusTimeout* dbus_timeout;
 	    bool enabled;
 	    int interval;
-	    DBusTimeout* dbus_timeout;
 	};
 
 	vector<Watch> watches;
@@ -76,6 +83,7 @@ namespace DBus
 	int wakeup_pipe[2];
 
 	vector<Watch>::iterator find_watch(DBusWatch* dbus_watch);
+	vector<Watch>::iterator find_enabled_watch(int fd, short events);
 	vector<Timeout>::iterator find_timeout(DBusTimeout* dbus_timeout);
 
 	static dbus_bool_t add_watch(DBusWatch* dbus_watch, void* data);
@@ -90,10 +98,10 @@ namespace DBus
 
 	void dispatch_incoming(Message& message);
 
-	int idle_timeout;
-	time_t last_action;
+	milliseconds idle_for() const;
 
-	static time_t monotonic_clock();
+	milliseconds idle_timeout;
+	steady_clock::time_point last_action;
 
     };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -37,17 +37,22 @@ namespace snapper
     using std::vector;
 
 
-    class MtabData;
+    struct MtabData;
+    class ConfigInfo;
 
 
     class Filesystem
     {
     public:
 
-	Filesystem(const string& subvolume) : subvolume(subvolume) {}
+	Filesystem(const string& subvolume, const string& root_prefix)
+	    : subvolume(subvolume), root_prefix(root_prefix) {}
 	virtual ~Filesystem() {}
 
-	static Filesystem* create(const string& fstype, const string& subvolume);
+	static Filesystem* create(const string& fstype, const string& subvolume, const string& root_prefix);
+	static Filesystem* create(const ConfigInfo& config_info, const string& root_prefix);
+
+	virtual void evalConfigInfo(const ConfigInfo& config_info) {}
 
 	virtual string fstype() const = 0;
 
@@ -61,20 +66,29 @@ namespace snapper
 	virtual SDir openInfoDir(unsigned int num) const;
 	virtual SDir openSnapshotDir(unsigned int num) const = 0;
 
-	virtual void createSnapshot(unsigned int num) const = 0;
+	virtual void createSnapshot(unsigned int num, unsigned int num_parent,
+				    bool read_only) const = 0;
+	virtual void createSnapshotOfDefault(unsigned int num, bool read_only) const;
 	virtual void deleteSnapshot(unsigned int num) const = 0;
 
 	virtual bool isSnapshotMounted(unsigned int num) const = 0;
 	virtual void mountSnapshot(unsigned int num) const = 0;
 	virtual void umountSnapshot(unsigned int num) const = 0;
 
+	virtual bool isSnapshotReadOnly(unsigned int num) const = 0;
+
 	virtual bool checkSnapshot(unsigned int num) const = 0;
 
 	virtual void cmpDirs(const SDir& dir1, const SDir& dir2, cmpdirs_cb_t cb) const;
 
+	virtual void setDefault(unsigned int num) const;
+
+	virtual void sync() const;
+
     protected:
 
 	const string subvolume;
+	const string root_prefix;
 
 	static vector<string> filter_mount_options(const vector<string>& options);
 

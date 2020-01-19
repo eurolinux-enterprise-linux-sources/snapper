@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2012-2013] Novell, Inc.
+ * Copyright (c) [2012-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -19,6 +19,8 @@
  * find current contact information at www.novell.com.
  */
 
+
+#include "config.h"
 
 #include <snapper/Log.h>
 #include <snapper/SnapperTmpl.h>
@@ -267,6 +269,25 @@ Client::introspect(DBus::Connection& conn, DBus::Message& msg)
 	"      <arg name='number' type='u' direction='out'/>\n"
 	"    </method>\n"
 
+	"    <method name='CreateSingleSnapshotV2'>\n"
+	"      <arg name='config-name' type='s' direction='in'/>\n"
+	"      <arg name='parent-number' type='u' direction='in'/>\n"
+	"      <arg name='read-only' type='b' direction='in'/>\n"
+	"      <arg name='description' type='s' direction='in'/>\n"
+	"      <arg name='cleanup' type='s' direction='in'/>\n"
+	"      <arg name='userdata' type='a{ss}' direction='in'/>\n"
+	"      <arg name='number' type='u' direction='out'/>\n"
+	"    </method>\n"
+
+	"    <method name='CreateSingleSnapshotOfDefault'>\n"
+	"      <arg name='config-name' type='s' direction='in'/>\n"
+	"      <arg name='read-only' type='b' direction='in'/>\n"
+	"      <arg name='description' type='s' direction='in'/>\n"
+	"      <arg name='cleanup' type='s' direction='in'/>\n"
+	"      <arg name='userdata' type='a{ss}' direction='in'/>\n"
+	"      <arg name='number' type='u' direction='out'/>\n"
+	"    </method>\n"
+
 	"    <method name='CreatePreSnapshot'>\n"
 	"      <arg name='config-name' type='s' direction='in'/>\n"
 	"      <arg name='description' type='s' direction='in'/>\n"
@@ -326,6 +347,10 @@ Client::introspect(DBus::Connection& conn, DBus::Message& msg)
 	"      <arg name='files' type='v' direction='out'/>\n"
 	"    </method>\n"
 
+	"    <method name='Sync'>\n"
+	"      <arg name='config-name' type='s' direction='in'/>\n"
+	"    </method>\n"
+
 	"  </interface>\n"
 	"</node>\n";
 
@@ -361,11 +386,32 @@ Client::check_permission(DBus::Connection& conn, DBus::Message& msg,
 			 const MetaSnapper& meta_snapper) const
 {
     unsigned long uid = conn.get_unix_userid(msg);
+
+    // Check if the uid of the dbus-user is root.
     if (uid == 0)
 	return;
 
-    if (find(meta_snapper.uids.begin(), meta_snapper.uids.end(), uid) != meta_snapper.uids.end())
+    // Check if the uid of the dbus-user is included in the allowed uids.
+    if (contains(meta_snapper.uids, uid))
 	return;
+
+    string username;
+    gid_t gid;
+
+    if (get_uid_username_gid(uid, username, gid))
+    {
+	// Check if the primary gid of the dbus-user is included in the allowed gids.
+	if (contains(meta_snapper.gids, gid))
+	    return;
+
+	vector<gid_t> gids = getgrouplist(username.c_str(), gid);
+
+	// Check if any (primary or secondary) gid of the dbus-user is included in the allowed
+	// gids.
+	for (vector<gid_t>::const_iterator it = gids.begin(); it != gids.end(); ++it)
+	    if (contains(meta_snapper.gids, *it))
+		return;
+    }
 
     throw Permissions();
 }
@@ -501,13 +547,6 @@ Client::signal_snapshots_deleted(DBus::Connection& conn, const string& config_na
 
     conn.send(msg);
 }
-
-
-struct UnknownFile : public std::exception
-{
-    explicit UnknownFile() throw() {}
-    virtual const char* what() const throw() { return "unknown config"; }
-};
 
 
 void
@@ -788,12 +827,10 @@ Client::set_snapshot(DBus::Connection& conn, DBus::Message& msg)
 {
     string config_name;
     dbus_uint32_t num;
-    string description;
-    string cleanup;
-    map<string, string> userdata;
+    SMD smd;
 
     DBus::Hihi hihi(msg);
-    hihi >> config_name >> num >> description >> cleanup >> userdata;
+    hihi >> config_name >> num >> smd.description >> smd.cleanup >> smd.userdata;
 
     y2deb("SetSnapshot config_name:" << config_name << " num:" << num);
 
@@ -810,10 +847,7 @@ Client::set_snapshot(DBus::Connection& conn, DBus::Message& msg)
     if (snap == snapshots.end())
 	throw IllegalSnapshotException();
 
-    snap->setDescription(description);
-    snap->setCleanup(cleanup);
-    snap->setUserdata(userdata);
-    snap->flushInfo();
+    snapper->modifySnapshot(snap, smd);
 
     DBus::MessageMethodReturn reply(msg);
 
@@ -827,29 +861,24 @@ void
 Client::create_single_snapshot(DBus::Connection& conn, DBus::Message& msg)
 {
     string config_name;
-    string description;
-    string cleanup;
-    map<string, string> userdata;
+    SCD scd;
 
     DBus::Hihi hihi(msg);
-    hihi >> config_name >> description >> cleanup >> userdata;
+    hihi >> config_name >> scd.description >> scd.cleanup >> scd.userdata;
 
-    y2deb("CreateSingleSnapshot config_name:" << config_name << " description:" << description <<
-	  " cleanup:" << cleanup);
+    y2deb("CreateSingleSnapshot config_name:" << config_name << " description:" << scd.description <<
+	  " cleanup:" << scd.cleanup);
 
     boost::unique_lock<boost::shared_mutex> lock(big_mutex);
 
     MetaSnappers::iterator it = meta_snappers.find(config_name);
 
     check_permission(conn, msg, *it);
+    scd.uid = conn.get_unix_userid(msg);
 
     Snapper* snapper = it->getSnapper();
 
-    Snapshots::iterator snap1 = snapper->createSingleSnapshot(description);
-    snap1->setUid(conn.get_unix_userid(msg));
-    snap1->setCleanup(cleanup);
-    snap1->setUserdata(userdata);
-    snap1->flushInfo();
+    Snapshots::iterator snap1 = snapper->createSingleSnapshot(scd);
 
     DBus::MessageMethodReturn reply(msg);
 
@@ -863,32 +892,100 @@ Client::create_single_snapshot(DBus::Connection& conn, DBus::Message& msg)
 
 
 void
-Client::create_pre_snapshot(DBus::Connection& conn, DBus::Message& msg)
+Client::create_single_snapshot_v2(DBus::Connection& conn, DBus::Message& msg)
 {
     string config_name;
-    string description;
-    string cleanup;
-    map<string, string> userdata;
+    unsigned int parent_num;
+    SCD scd;
 
     DBus::Hihi hihi(msg);
-    hihi >> config_name >> description >> cleanup >> userdata;
+    hihi >> config_name >> parent_num >> scd.read_only >> scd.description >> scd.cleanup >> scd.userdata;
 
-    y2deb("CreatePreSnapshot config_name:" << config_name << " description:" << description <<
-	  " cleanup:" << cleanup);
+    y2deb("CreateSingleSnapshotV2 config_name:" << config_name << " parent_num:" << parent_num <<
+	  " read_only:" << scd.read_only << " description:" << scd.description << " cleanup:" << scd.cleanup);
 
     boost::unique_lock<boost::shared_mutex> lock(big_mutex);
 
     MetaSnappers::iterator it = meta_snappers.find(config_name);
 
     check_permission(conn, msg, *it);
+    scd.uid = conn.get_unix_userid(msg);
 
     Snapper* snapper = it->getSnapper();
 
-    Snapshots::iterator snap1 = snapper->createPreSnapshot(description);
-    snap1->setUid(conn.get_unix_userid(msg));
-    snap1->setCleanup(cleanup);
-    snap1->setUserdata(userdata);
-    snap1->flushInfo();
+    Snapshots& snapshots = snapper->getSnapshots();
+
+    Snapshots::iterator parent = snapshots.find(parent_num);
+
+    Snapshots::iterator snap2 = snapper->createSingleSnapshot(parent, scd);
+
+    DBus::MessageMethodReturn reply(msg);
+
+    DBus::Hoho hoho(reply);
+    hoho << snap2->getNum();
+
+    conn.send(reply);
+
+    signal_snapshot_created(conn, config_name, snap2->getNum());
+}
+
+
+void
+Client::create_single_snapshot_of_default(DBus::Connection& conn, DBus::Message& msg)
+{
+    string config_name;
+    SCD scd;
+
+    DBus::Hihi hihi(msg);
+    hihi >> config_name >> scd.read_only >> scd.description >> scd.cleanup >> scd.userdata;
+
+    y2deb("CreateSingleSnapshotOfDefault config_name:" << config_name << " read_only:" <<
+	  scd.read_only << " description:" << scd.description << " cleanup:" << scd.cleanup);
+
+    boost::unique_lock<boost::shared_mutex> lock(big_mutex);
+
+    MetaSnappers::iterator it = meta_snappers.find(config_name);
+
+    check_permission(conn, msg, *it);
+    scd.uid = conn.get_unix_userid(msg);
+
+    Snapper* snapper = it->getSnapper();
+
+    Snapshots::iterator snap = snapper->createSingleSnapshotOfDefault(scd);
+
+    DBus::MessageMethodReturn reply(msg);
+
+    DBus::Hoho hoho(reply);
+    hoho << snap->getNum();
+
+    conn.send(reply);
+
+    signal_snapshot_created(conn, config_name, snap->getNum());
+}
+
+
+void
+Client::create_pre_snapshot(DBus::Connection& conn, DBus::Message& msg)
+{
+    string config_name;
+    SCD scd;
+
+    DBus::Hihi hihi(msg);
+    hihi >> config_name >> scd.description >> scd.cleanup >> scd.userdata;
+
+    y2deb("CreatePreSnapshot config_name:" << config_name << " description:" << scd.description <<
+	  " cleanup:" << scd.cleanup);
+
+    boost::unique_lock<boost::shared_mutex> lock(big_mutex);
+
+    MetaSnappers::iterator it = meta_snappers.find(config_name);
+
+    check_permission(conn, msg, *it);
+    scd.uid = conn.get_unix_userid(msg);
+
+    Snapper* snapper = it->getSnapper();
+
+    Snapshots::iterator snap1 = snapper->createPreSnapshot(scd);
 
     DBus::MessageMethodReturn reply(msg);
 
@@ -906,35 +1003,31 @@ Client::create_post_snapshot(DBus::Connection& conn, DBus::Message& msg)
 {
     string config_name;
     unsigned int pre_num;
-    string description;
-    string cleanup;
-    map<string, string> userdata;
+    SCD scd;
 
     DBus::Hihi hihi(msg);
-    hihi >> config_name >> pre_num >> description >> cleanup >> userdata;
+    hihi >> config_name >> pre_num >> scd.description >> scd.cleanup >> scd.userdata;
 
     y2deb("CreatePostSnapshot config_name:" << config_name << " pre_num:" << pre_num <<
-	  " description:" << description << " cleanup:" << cleanup);
+	  " description:" << scd.description << " cleanup:" << scd.cleanup);
 
     boost::unique_lock<boost::shared_mutex> lock(big_mutex);
 
     MetaSnappers::iterator it = meta_snappers.find(config_name);
 
     check_permission(conn, msg, *it);
+    scd.uid = conn.get_unix_userid(msg);
 
     Snapper* snapper = it->getSnapper();
     Snapshots& snapshots = snapper->getSnapshots();
 
     Snapshots::iterator snap1 = snapshots.find(pre_num);
 
-    Snapshots::iterator snap2 = snapper->createPostSnapshot(description, snap1);
-    snap2->setUid(conn.get_unix_userid(msg));
-    snap2->setCleanup(cleanup);
-    snap2->setUserdata(userdata);
-    snap2->flushInfo();
+    Snapshots::iterator snap2 = snapper->createPostSnapshot(snap1, scd);
 
-    bool tmp;
-    if (it->getConfigInfo().getValue("BACKGROUND_COMPARISON", tmp) && tmp)
+    bool background_comparison = true;
+    it->getConfigInfo().getValue("BACKGROUND_COMPARISON", background_comparison);
+    if (background_comparison)
 	backgrounds.add_task(it, snap1, snap2);
 
     DBus::MessageMethodReturn reply(msg);
@@ -1199,6 +1292,30 @@ Client::get_files(DBus::Connection& conn, DBus::Message& msg)
 
 
 void
+Client::sync(DBus::Connection& conn, DBus::Message& msg)
+{
+    string config_name;
+
+    DBus::Hihi hihi(msg);
+    hihi >> config_name;
+
+    y2deb("Sync config_name:" << config_name);
+
+    MetaSnappers::iterator it = meta_snappers.find(config_name);
+
+    check_permission(conn, msg, *it);
+
+    Snapper* snapper = it->getSnapper();
+
+    snapper->syncFilesystem();
+
+    DBus::MessageMethodReturn reply(msg);
+
+    conn.send(reply);
+}
+
+
+void
 Client::debug(DBus::Connection& conn, DBus::Message& msg) const
 {
     y2deb("Debug");
@@ -1246,12 +1363,16 @@ Client::debug(DBus::Connection& conn, DBus::Message& msg) const
 	{
 	    s << ", loaded";
 	    if (it->use_count() == 0)
-		s << ", unused for " << it->unused_for() << "s";
+		s << ", unused for " << duration_cast<milliseconds>(it->unused_for()).count() << "ms";
 	    else
 		s << ", use count " << it->use_count();
 	}
 	hoho << s.str();
     }
+
+    hoho << "compile options:";
+    hoho << "    version " + string(Snapper::compileVersion());
+    hoho << "    flags " + string(Snapper::compileFlags());
 
     hoho.close_array();
 
@@ -1288,6 +1409,10 @@ Client::dispatch(DBus::Connection& conn, DBus::Message& msg)
 	    set_snapshot(conn, msg);
 	else if (msg.is_method_call(INTERFACE, "CreateSingleSnapshot"))
 	    create_single_snapshot(conn, msg);
+	else if (msg.is_method_call(INTERFACE, "CreateSingleSnapshotV2"))
+	    create_single_snapshot_v2(conn, msg);
+	else if (msg.is_method_call(INTERFACE, "CreateSingleSnapshotOfDefault"))
+	    create_single_snapshot_of_default(conn, msg);
 	else if (msg.is_method_call(INTERFACE, "CreatePreSnapshot"))
 	    create_pre_snapshot(conn, msg);
 	else if (msg.is_method_call(INTERFACE, "CreatePostSnapshot"))
@@ -1306,6 +1431,8 @@ Client::dispatch(DBus::Connection& conn, DBus::Message& msg)
 	    delete_comparison(conn, msg);
 	else if (msg.is_method_call(INTERFACE, "GetFiles"))
 	    get_files(conn, msg);
+	else if (msg.is_method_call(INTERFACE, "Sync"))
+	    sync(conn, msg);
 	else if (msg.is_method_call(INTERFACE, "Debug"))
 	    debug(conn, msg);
 	else
@@ -1383,11 +1510,6 @@ Client::dispatch(DBus::Connection& conn, DBus::Message& msg)
 	DBus::MessageError reply(msg, "error.delete_snapshot_failed", DBUS_ERROR_FAILED);
 	conn.send(reply);
     }
-    catch (const UnknownFile& e)
-    {
-	DBus::MessageError reply(msg, "error.unknown_file", DBUS_ERROR_FAILED);
-	conn.send(reply);
-    }
     catch (const InvalidConfigdataException& e)
     {
 	DBus::MessageError reply(msg, "error.invalid_configdata", DBUS_ERROR_FAILED);
@@ -1396,6 +1518,11 @@ Client::dispatch(DBus::Connection& conn, DBus::Message& msg)
     catch (const InvalidUserdataException& e)
     {
 	DBus::MessageError reply(msg, "error.invalid_userdata", DBUS_ERROR_FAILED);
+	conn.send(reply);
+    }
+    catch (const AclException& e)
+    {
+	DBus::MessageError reply(msg, "error.acl_error", DBUS_ERROR_FAILED);
 	conn.send(reply);
     }
     catch (const IOErrorException& e)
@@ -1416,6 +1543,16 @@ Client::dispatch(DBus::Connection& conn, DBus::Message& msg)
     catch (const UmountSnapshotFailedException& e)
     {
 	DBus::MessageError reply(msg, "error.umount_snapshot", DBUS_ERROR_FAILED);
+	conn.send(reply);
+    }
+    catch (const InvalidUserException& e)
+    {
+	DBus::MessageError reply(msg, "error.invalid_user", DBUS_ERROR_FAILED);
+	conn.send(reply);
+    }
+    catch (const InvalidGroupException& e)
+    {
+	DBus::MessageError reply(msg, "error.invalid_group", DBUS_ERROR_FAILED);
 	conn.send(reply);
     }
     catch (...)
@@ -1481,11 +1618,7 @@ Clients::add(const string& name)
 {
     assert(find(name) == entries.end());
 
-#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 4)
     entries.emplace_back(name);
-#else
-    entries.push_back(name);
-#endif
 
     return --entries.end();
 }

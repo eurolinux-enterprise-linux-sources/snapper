@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2014] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -47,20 +47,20 @@ namespace snapper
 {
 
     Filesystem*
-    Lvm::create(const string& fstype, const string& subvolume)
+    Lvm::create(const string& fstype, const string& subvolume, const string& root_prefix)
     {
 	Regex rx("^lvm\\(([_a-z0-9]+)\\)$");
 	if (rx.match(fstype))
-	    return new Lvm(subvolume, rx.cap(1));
+	    return new Lvm(subvolume, root_prefix, rx.cap(1));
 
 	return NULL;
     }
 
 
-    Lvm::Lvm(const string& subvolume, const string& mount_type)
-	: Filesystem(subvolume), mount_type(mount_type),
-	caps(LvmCapabilities::get_lvm_capabilities()),
-	cache(LvmCache::get_lvm_cache())
+    Lvm::Lvm(const string& subvolume, const string& root_prefix, const string& mount_type)
+	: Filesystem(subvolume, root_prefix), mount_type(mount_type),
+	  caps(LvmCapabilities::get_lvm_capabilities()),
+	  cache(LvmCache::get_lvm_cache())
     {
 	if (access(LVCREATEBIN, X_OK) != 0)
 	{
@@ -94,7 +94,10 @@ namespace snapper
 
 	mount_options = filter_mount_options(mtab_data.options);
 	if (mount_type == "xfs")
+	{
 	    mount_options.push_back("nouuid");
+	    mount_options.push_back("norecovery");
+	}
     }
 
 
@@ -186,8 +189,11 @@ namespace snapper
 
 
     void
-    Lvm::createSnapshot(unsigned int num) const
+    Lvm::createSnapshot(unsigned int num, unsigned int num_parent, bool read_only) const
     {
+	if (num_parent != 0 || !read_only)
+	    throw std::logic_error("not implemented");
+
 	SDir info_dir = openInfoDir(num);
 	int r1 = info_dir.mkdir("snapshot", 0755);
 	if (r1 != 0 && errno != EEXIST)
@@ -288,6 +294,15 @@ namespace snapper
 
 
     bool
+    Lvm::isSnapshotReadOnly(unsigned int num) const
+    {
+	// TODO
+
+	return true;
+    }
+
+
+    bool
     Lvm::checkSnapshot(unsigned int num) const
     {
 	return detectInactiveSnapshot(vg_name, snapshotLvName(num));
@@ -311,7 +326,7 @@ namespace snapper
 	{
 	    cache->add_or_update(vg_name, lv_name);
 	}
-	catch(const LvmCacheException& e)
+	catch (const LvmCacheException& e)
 	{
 	    y2deb(cache);
 	    return false;
@@ -319,6 +334,7 @@ namespace snapper
 
 	return cache->contains_thin(vg_name, lv_name);
     }
+
 
     string
     Lvm::getDevice(unsigned int num) const
@@ -335,7 +351,7 @@ namespace snapper
 	{
 	    cache->activate(vg_name, lv_name);
 	}
-	catch(const LvmCacheException& e)
+	catch (const LvmCacheException& e)
 	{
 	    y2deb(cache);
 	    throw LvmActivationException();
@@ -350,7 +366,7 @@ namespace snapper
 	{
 	    cache->deactivate(vg_name, lv_name);
 	}
-	catch(const LvmCacheException& e)
+	catch (const LvmCacheException& e)
 	{
 	    y2deb(cache);
 	    throw LvmDeactivatationException();
@@ -370,7 +386,7 @@ namespace snapper
     {
 	SystemCmd cmd(string(LVMBIN " version"));
 
-	if (cmd.retcode() != 0)
+	if (cmd.retcode() != 0 || cmd.stdout().empty())
 	{
 	    y2war("Couldn't get LVM version info");
 	}
@@ -378,7 +394,7 @@ namespace snapper
 	{
 	    Regex rx(".*LVM[[:space:]]+version:[[:space:]]+([0-9]+)\\.([0-9]+)\\.([0-9]+).*$");
 
-	    if (!rx.match(cmd.getLine(0)))
+	    if (!rx.match(cmd.stdout().front()))
 	    {
 		y2war("LVM version format didn't match");
 	    }

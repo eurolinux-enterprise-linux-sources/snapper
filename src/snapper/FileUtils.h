@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2014] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -82,7 +82,7 @@ namespace snapper
 	int stat(const string& name, struct stat* buf, int flags) const;
 	int open(const string& name, int flags) const;
 	int open(const string& name, int flags, mode_t mode) const;
-	int readlink(const string& name, string& buf) const;
+	ssize_t readlink(const string& name, string& buf) const;
 	int mkdir(const string& name, mode_t mode) const;
 	int unlink(const string& name, int flags) const;
 	int chmod(const string& name, mode_t mode, int flags) const;
@@ -90,6 +90,7 @@ namespace snapper
 	int rename(const string& oldname, const string& newname) const;
 
 	int mktemp(string& name) const;
+	bool mkdtemp(string& name) const;
 
 	bool xaSupported() const;
 
@@ -125,7 +126,7 @@ namespace snapper
 
 	int stat(struct stat* buf, int flags) const;
 	int open(int flags) const;
-	int readlink(string& buf) const;
+	ssize_t readlink(string& buf) const;
 	int chmod(mode_t mode, int flags) const;
 
 	bool xaSupported() const;
@@ -137,6 +138,38 @@ namespace snapper
 
 	const SDir& dir;
 	const string name;
+
+    };
+
+
+    class TmpDir
+    {
+
+    public:
+
+	TmpDir(SDir& base_dir, const string& name_template);
+	~TmpDir();
+
+	const string& getName() const { return name; }
+
+	string getFullname() const;
+
+    protected:
+
+	SDir& base_dir;
+	string name;
+
+    };
+
+
+    class TmpMount : public TmpDir
+    {
+
+    public:
+
+	TmpMount(SDir& base_dir, const string& device, const string& name_template,
+		 const string& mount_type, unsigned long mount_flags, const string& mount_data);
+	~TmpMount();
 
     };
 

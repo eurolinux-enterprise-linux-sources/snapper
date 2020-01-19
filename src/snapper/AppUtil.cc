@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2004-2012] Novell, Inc.
+ * Copyright (c) [2004-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -32,10 +32,10 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/sendfile.h>
-#include <pwd.h>
 #include <dirent.h>
 #include <mntent.h>
 #include <boost/algorithm/string.hpp>
+#include <boost/io/ios_state.hpp>
 
 #include "snapper/Log.h"
 #include "snapper/AppUtil.h"
@@ -91,10 +91,15 @@ namespace snapper
     bool
     copyfile(int src_fd, int dest_fd)
     {
+	posix_fadvise(src_fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+
+	// TODO: maybe use POSIX_FADV_DONTNEED on dest_fd, but this could
+	// trigger a kernel bug (see bsc #888259)
+
 	while (true)
 	{
 	    // use small value for count to make function better interruptible
-	    ssize_t r1 = sendfile(dest_fd, src_fd, NULL, 0xffff);
+	    ssize_t r1 = sendfile(dest_fd, src_fd, NULL, 0x10000);
 	    if (r1 == 0)
 		return true;
 
@@ -107,11 +112,11 @@ namespace snapper
     }
 
 
-    int
+    ssize_t
     readlink(const string& path, string& buf)
     {
 	char tmp[1024];
-	int ret = ::readlink(path.c_str(), tmp, sizeof(tmp));
+	ssize_t ret = ::readlink(path.c_str(), tmp, sizeof(tmp));
 	if (ret >= 0)
 	    buf = string(tmp, ret);
 	return ret;
@@ -134,6 +139,16 @@ namespace snapper
 	string s(buf);
 	free(buf);
 	return s;
+    }
+
+
+    string
+    prepend_root_prefix(const string& root_prefix, const string& path)
+    {
+        if (root_prefix == "/")
+            return path;
+        else
+            return root_prefix + path;
     }
 
 
@@ -263,8 +278,8 @@ namespace snapper
     }
 
 
-    string
-    username(uid_t uid)
+    bool
+    get_uid_username_gid(uid_t uid, string& username, gid_t& gid)
     {
 	struct passwd pwd;
 	struct passwd* result;
@@ -273,35 +288,103 @@ namespace snapper
 	char buf[bufsize];
 
 	if (getpwuid_r(uid, &pwd, buf, bufsize, &result) != 0 || result != &pwd)
-	    return "unknown";
+	    return false;
 
 	memset(pwd.pw_passwd, 0, strlen(pwd.pw_passwd));
 
-	return pwd.pw_name;
+	username = pwd.pw_name;
+	gid = pwd.pw_gid;
+
+	return true;
+    }
+
+
+    bool
+    get_user_uid(const char* username, uid_t& uid)
+    {
+	struct passwd pwd;
+	struct passwd* result;
+
+	long bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
+	char buf[bufsize];
+
+	if (getpwnam_r(username, &pwd, buf, bufsize, &result) != 0 || result != &pwd)
+	{
+	    y2war("couldn't find username '" << username << "'");
+	    return false;
+	}
+
+	memset(pwd.pw_passwd, 0, strlen(pwd.pw_passwd));
+
+	uid = pwd.pw_uid;
+
+	return true;
+    }
+
+
+    bool
+    get_group_gid(const char* groupname, gid_t& gid)
+    {
+	struct group grp;
+	struct group* result;
+
+	long bufsize = sysconf(_SC_GETGR_R_SIZE_MAX);
+	char buf[bufsize];
+
+	if (getgrnam_r(groupname, &grp, buf, bufsize, &result) != 0 || result != &grp)
+	{
+	    y2war("couldn't find groupname '" << groupname << "'");
+	    return false;
+	}
+
+	memset(grp.gr_passwd, 0, strlen(grp.gr_passwd));
+
+	gid = grp.gr_gid;
+
+	return true;
+    }
+
+
+    vector<gid_t>
+    getgrouplist(const char* username, gid_t gid)
+    {
+	int n = 16;
+	gid_t* buf = (gid_t*) malloc(sizeof(gid_t) * n);
+
+	if (::getgrouplist(username, gid, buf, &n) == -1)
+	{
+	    buf = (gid_t*) realloc(buf, sizeof(gid_t) * n);
+	    ::getgrouplist(username, gid, buf, &n);
+	}
+
+	vector<gid_t> gids(&buf[0], &buf[n]);
+	sort(gids.begin(), gids.end());
+
+	free(buf);
+
+	return gids;
     }
 
 
     StopWatch::StopWatch()
+	: start_time(chrono::steady_clock::now())
     {
-	gettimeofday(&start_tv, NULL);
     }
 
 
     double
     StopWatch::read() const
     {
-	struct timeval stop_tv;
-	gettimeofday(&stop_tv, NULL);
-
-	struct timeval tv;
-	timersub(&stop_tv, &start_tv, &tv);
-
-	return double(tv.tv_sec) + (double)(tv.tv_usec) / 1000000.0;
+	chrono::steady_clock::time_point stop_time = chrono::steady_clock::now();
+	chrono::steady_clock::duration duration = stop_time - start_time;
+	return chrono::duration<double>(duration).count();
     }
 
 
-    std::ostream& operator<<(std::ostream& s, const StopWatch& sw)
+    std::ostream&
+    operator<<(std::ostream& s, const StopWatch& sw)
     {
+	boost::io::ios_all_saver ias(s);
 	return s << fixed << sw.read() << "s";
     }
 

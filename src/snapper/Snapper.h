@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -44,7 +44,7 @@ namespace snapper
     {
     public:
 
-	explicit ConfigInfo(const string& config_name);
+	explicit ConfigInfo(const string& config_name, const string& root_prefix);
 
 	const string& getConfigName() const { return config_name; }
 	const string& getSubvolume() const { return subvolume; }
@@ -110,10 +110,10 @@ namespace snapper
     {
     public:
 
-	Snapper(const string& config_name = "root", bool disable_filters = false);
+	Snapper(const string& config_name, const string& root_prefix, bool disable_filters = false);
 	~Snapper();
 
-	string configName() const { return config_info->getConfigName(); }
+	const string& configName() const { return config_info->getConfigName(); }
 
 	string subvolumeDir() const;
 
@@ -125,23 +125,38 @@ namespace snapper
 
 	Snapshots::const_iterator getSnapshotCurrent() const;
 
-	Snapshots::iterator createSingleSnapshot(string description);
-	Snapshots::iterator createPreSnapshot(string description);
-	Snapshots::iterator createPostSnapshot(string description, Snapshots::const_iterator pre);
+	Snapshots::iterator createSingleSnapshot(const SCD& scd);
+	Snapshots::iterator createSingleSnapshot(Snapshots::const_iterator parent, const SCD& scd);
+	Snapshots::iterator createSingleSnapshotOfDefault(const SCD& scd);
+	Snapshots::iterator createPreSnapshot(const SCD& scd);
+	Snapshots::iterator createPostSnapshot(Snapshots::const_iterator pre, const SCD& scd);
+
+	void modifySnapshot(Snapshots::iterator snapshot, const SMD& smd);
 
 	void deleteSnapshot(Snapshots::iterator snapshot);
 
 	const vector<string>& getIgnorePatterns() const { return ignore_patterns; }
 
-	static ConfigInfo getConfig(const string& config_name);
-	static list<ConfigInfo> getConfigs();
-	static void createConfig(const string& config_name, const string& subvolume,
-				 const string& fstype, const string& template_name);
-	static void deleteConfig(const string& config_name);
+	static ConfigInfo getConfig(const string& config_name, const string& root_prefix);
+	static list<ConfigInfo> getConfigs(const string& root_prefix);
+
+	static void createConfig(const string& config_name, const string& root_prefix,
+				 const string& subvolume, const string& fstype,
+				 const string& template_name);
+	static void deleteConfig(const string& config_name, const string& root_prefix);
 
 	static bool detectFstype(const string& subvolume, string& fstype);
 
 	const Filesystem* getFilesystem() const { return filesystem; }
+
+	void setConfigInfo(const map<string, string>& raw);
+
+	void syncAcl() const;
+
+	void syncFilesystem() const;
+
+	static const char* compileVersion();
+	static const char* compileFlags();
 
     private:
 
@@ -149,6 +164,8 @@ namespace snapper
 	void filter2(list<Snapshots::iterator>& tmp);
 
 	void loadIgnorePatterns();
+
+	void syncAcl(const vector<uid_t>& uids, const vector<gid_t>& gids) const;
 
 	ConfigInfo* config_info;
 

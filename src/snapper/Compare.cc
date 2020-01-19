@@ -38,6 +38,7 @@
 #include "snapper/Compare.h"
 #include "snapper/Exception.h"
 #include "snapper/XAttributes.h"
+#include "snapper/Acls.h"
 
 
 namespace snapper
@@ -76,8 +77,8 @@ namespace snapper
 	    return false;
 	}
 
-	posix_fadvise(fd1, 0, stat1.st_size, POSIX_FADV_SEQUENTIAL);
-	posix_fadvise(fd2, 0, stat2.st_size, POSIX_FADV_SEQUENTIAL);
+	posix_fadvise(fd1, 0, 0, POSIX_FADV_SEQUENTIAL);
+	posix_fadvise(fd2, 0, 0, POSIX_FADV_SEQUENTIAL);
 
 	static_assert(sizeof(off_t) >= 8, "off_t is too small");
 
@@ -93,7 +94,7 @@ namespace snapper
 	{
 	    off_t t = min(block_size, length);
 
-	    int r1 = read(fd1, block1, t);
+	    ssize_t r1 = read(fd1, block1, t);
 	    if (r1 != t)
 	    {
 		y2err("read failed path:" << file1.fullname() << " errno:" << errno);
@@ -101,7 +102,7 @@ namespace snapper
 		break;
 	    }
 
-	    int r2 = read(fd2, block2, t);
+	    ssize_t r2 = read(fd2, block2, t);
 	    if (r2 != t)
 	    {
 		y2err("read failed path:" << file2.fullname() << " errno:" << errno);
@@ -211,7 +212,7 @@ namespace snapper
 
 	if (stat1.st_uid != stat2.st_uid)
 	{
-	    status |= USER;
+	    status |= OWNER;
 	}
 
 	if (stat1.st_gid != stat2.st_gid)
@@ -222,10 +223,7 @@ namespace snapper
 #ifdef ENABLE_XATTRS
 	if (file1.xaSupported() && file2.xaSupported())
 	{
-	    if (!cmpFilesXattrs(file1, file2))
-	    {
-		status |= XATTRS;
-	    }
+	    status |= cmpFilesXattrs(file1, file2);
 	}
 #endif
 
@@ -467,19 +465,34 @@ namespace snapper
     }
 
 
-    bool
+    unsigned int
     cmpFilesXattrs(const SFile& file1, const SFile& file2)
     {
         try
         {
 	    XAttributes xa(file1);
 	    XAttributes xb(file2);
-	    return xa == xb;
+
+	    if (xa == xb)
+	    {
+		return 0;
+	    }
+	    else
+	    {
+		unsigned int status = XATTRS;
+
+		CompareAcls acl_a(xa);
+		CompareAcls acl_b(xb);
+
+		status |= (acl_a == acl_b) ? 0 : ACL;
+
+		return status;
+	    }
         }
 	catch (const XAttributesException& e)
         {
-            y2err("extended attributes compare failed");
-	    return false;
+	    y2err("extended attributes or ACL compare failed");
+	    return (XATTRS | ACL);
 	}
     }
 

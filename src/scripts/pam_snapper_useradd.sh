@@ -12,12 +12,12 @@
 CMD_BTRFS="/sbin/btrfs"
 CMD_SNAPPER="/usr/bin/snapper"
 CMD_EGREP="grep -E"
-CMD_PAM_CONFIG="pamconfig"
+CMD_PAM_CONFIG="/usr/sbin/pam-config"
 CMD_SED="sed"
 CMD_USERADD="useradd -m"
 CMD_USERDEL="userdel -r"
 CMD_CHOWN="chown"
-CMD_CHOWN="chmod"
+CMD_CHMOD="chmod"
 #
 SNAPPERCFGDIR="/etc/snapper/configs"
 HOMEHOME=/home
@@ -57,4 +57,3 @@ else
 	echo -e "#"
 	echo "DRYRUN - no changes submitted"
 fi
-

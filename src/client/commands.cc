@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Novell, Inc.
+ * Copyright (c) [2012-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -20,7 +20,13 @@
  */
 
 
+#include <iostream>
+
 #include "commands.h"
+#include "utils/text.h"
+#include "snapper/AppUtil.h"
+
+using namespace std;
 
 
 #define SERVICE "org.opensuse.Snapper"
@@ -174,6 +180,50 @@ command_create_single_xsnapshot(DBus::Connection& conn, const string& config_nam
 
 
 unsigned int
+command_create_single_xsnapshot_v2(DBus::Connection& conn, const string& config_name,
+				   unsigned int parent_num, bool read_only,
+				   const string& description, const string& cleanup,
+				   const map<string, string>& userdata)
+{
+    DBus::MessageMethodCall call(SERVICE, OBJECT, INTERFACE, "CreateSingleSnapshotV2");
+
+    DBus::Hoho hoho(call);
+    hoho << config_name << parent_num << read_only << description << cleanup << userdata;
+
+    DBus::Message reply = conn.send_with_reply_and_block(call);
+
+    unsigned int number;
+
+    DBus::Hihi hihi(reply);
+    hihi >> number;
+
+    return number;
+}
+
+
+unsigned int
+command_create_single_xsnapshot_of_default(DBus::Connection& conn, const string& config_name,
+					   bool read_only, const string& description,
+					   const string& cleanup,
+					   const map<string, string>& userdata)
+{
+    DBus::MessageMethodCall call(SERVICE, OBJECT, INTERFACE, "CreateSingleSnapshotOfDefault");
+
+    DBus::Hoho hoho(call);
+    hoho << config_name << read_only << description << cleanup << userdata;
+
+    DBus::Message reply = conn.send_with_reply_and_block(call);
+
+    unsigned int number;
+
+    DBus::Hihi hihi(reply);
+    hihi >> number;
+
+    return number;
+}
+
+
+unsigned int
 command_create_pre_xsnapshot(DBus::Connection& conn, const string& config_name,
 			     const string& description, const string& cleanup,
 			     const map<string, string>& userdata)
@@ -217,8 +267,22 @@ command_create_post_xsnapshot(DBus::Connection& conn, const string& config_name,
 
 void
 command_delete_xsnapshots(DBus::Connection& conn, const string& config_name,
-			  list<unsigned int> nums)
+			  const list<unsigned int>& nums, bool verbose)
 {
+    if (verbose)
+    {
+	cout << sformat(_("Deleting snapshot from %s:", "Deleting snapshots from %s:", nums.size()),
+			config_name.c_str()) << endl;
+
+	for (list<unsigned int>::const_iterator it = nums.begin(); it != nums.end(); ++it)
+	{
+	    if (it != nums.begin())
+		cout << ", ";
+	    cout << *it;
+	}
+	cout << endl;
+    }
+
     DBus::MessageMethodCall call(SERVICE, OBJECT, INTERFACE, "DeleteSnapshots");
 
     DBus::Hoho hoho(call);
@@ -294,6 +358,26 @@ command_create_xcomparison(DBus::Connection& conn, const string& config_name, un
 }
 
 
+void
+command_delete_xcomparison(DBus::Connection& conn, const string& config_name, unsigned int number1,
+			   unsigned int number2)
+{
+    DBus::MessageMethodCall call(SERVICE, OBJECT, INTERFACE, "DeleteComparison");
+
+    DBus::Hoho hoho(call);
+    hoho << config_name << number1 << number2;
+
+    conn.send_with_reply_and_block(call);
+}
+
+
+int
+operator<(const XFile& lhs, const XFile& rhs)
+{
+    return File::cmp_lt(lhs.name, rhs.name);
+}
+
+
 list<XFile>
 command_get_xfiles(DBus::Connection& conn, const string& config_name, unsigned int number1,
 		   unsigned int number2)
@@ -310,7 +394,22 @@ command_get_xfiles(DBus::Connection& conn, const string& config_name, unsigned i
     DBus::Hihi hihi(reply);
     hihi >> files;
 
+    files.sort();		// snapperd can have different locale than client
+				// so sorting is required here
+
     return files;
+}
+
+
+void
+command_xsync(DBus::Connection& conn, const string& config_name)
+{
+    DBus::MessageMethodCall call(SERVICE, OBJECT, INTERFACE, "Sync");
+
+    DBus::Hoho hoho(call);
+    hoho << config_name;
+
+    conn.send_with_reply_and_block(call);
 }
 
 

@@ -28,7 +28,8 @@ main()
 
     check_undo_statistics(0, 1, 0);
 
-    check_xa_undo_statistics(2, 1, 1);
+    // do not count ACLs
+    check_xa_undo_statistics(1, 1, 1);
 
     check_undo_errors(0, 0, 0);
 

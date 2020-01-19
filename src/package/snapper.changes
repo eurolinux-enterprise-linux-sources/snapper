@@ -1,8 +1,323 @@
 -------------------------------------------------------------------
+Wed Aug 26 11:58:24 CEST 2015 - aschnell@suse.de
+
+- allow to disable zypp plugin via environment variable (see
+  fate#319316)
+- version 0.2.8
+
+-------------------------------------------------------------------
+Tue Jul 07 12:49:16 CEST 2015 - aschnell@suse.de
+
+- extended snapper-configs man-page
+
+-------------------------------------------------------------------
+Mon Jun 29 14:52:31 CEST 2015 - aschnell@suse.de
+
+- allow to set cleanup algorithm for snapshots created by helper
+  programs
+
+-------------------------------------------------------------------
+Tue Jun 02 14:55:07 CEST 2015 - aschnell@suse.de
+
+- added error message for invalid locale setting (see bsc#933241)
+
+-------------------------------------------------------------------
+Mon May 25 11:41:59 UTC 2015 - jreidinger@suse.com
+
+- allow list-configs command to work on different root
+  (for fate#317900)
+
+-------------------------------------------------------------------
+Fri May 22 07:15:24 UTC 2015 - igonzalezsosa@suse.com
+
+- Version 0.2.7
+
+-------------------------------------------------------------------
+Mon May 18 14:38:17 UTC 2015 - igonzalezsosa@suse.com
+
+- added a helper to create snapshots without D-Bus
+  during system installation/upgrade (fate#317973)
+
+-------------------------------------------------------------------
+Tue May 05 14:08:03 CEST 2015 - aschnell@suse.de
+
+- added option --sync to delete command (fate#317066)
+
+-------------------------------------------------------------------
+Tue Apr 14 17:58:17 CEST 2015 - aschnell@suse.de
+
+- added option --input to diff command
+- sort files according to locale
+
+-------------------------------------------------------------------
+Tue Mar 03 10:22:28 CET 2015 - aschnell@suse.de
+
+- allow to set userdata for snapshots created by helper programs
+
+-------------------------------------------------------------------
+Mon Mar 02 17:30:06 CET 2015 - aschnell@suse.de
+
+- install systemd unit files and helper (see
+  gh#openSUSE/snapper#154)
+
+-------------------------------------------------------------------
+Tue Feb 24 11:48:12 CET 2015 - aschnell@suse.de
+
+- drop -mt decoration from boost libraries (see
+  http://www.boost.org/users/history/version_1_40_0.html)
+
+-------------------------------------------------------------------
+Fri Feb 20 14:10:01 CET 2015 - aschnell@suse.de
+
+- added comments in helper program
+
+-------------------------------------------------------------------
+Mon Feb 16 12:01:03 CET 2015 - aschnell@suse.de
+
+- added helper to support installation into subvolume (fate#318392)
+- added root-prefix parameter for config functions
+- pass single struct instead of many values to create and modify
+  snapshot functions
+- removed deprecated functions
+- version 0.2.6
+
+-------------------------------------------------------------------
+Tue Jan 27 12:31:45 CET 2015 - aschnell@suse.de
+
+- use C++11 chrono::steady_clock
+
+-------------------------------------------------------------------
+Mon Jan 19 12:42:13 CET 2015 - aschnell@suse.de
+
+- stricter dbus string escaping (see bsc#913238)
+- implemented dbus string escaping in pam_snapper
+- version 0.2.5
+
+-------------------------------------------------------------------
+Mon Jan 12 12:19:30 CET 2015 - aschnell@suse.de
+
+- fixed compilation with clang
+
+-------------------------------------------------------------------
+Mon Dec 15 15:14:39 CET 2014 - aschnell@suse.de
+
+- ignore everything in .snapshots not matching a number
+
+-------------------------------------------------------------------
+Fri Dec 12 10:34:37 CET 2014 - aschnell@suse.de
+
+- improved error messages (bsc#889928 and bsc#903834)
+
+-------------------------------------------------------------------
+Thu Dec 11 17:58:14 CET 2014 - aschnell@suse.de
+
+- support weekly snapshots in cleanup algorithm (see
+  gh#openSUSE/snapper#135)
+
+-------------------------------------------------------------------
+Thu Oct 23 12:05:12 CEST 2014 - aschnell@suse.de
+
+- use boost unit test framework and automake check feature
+
+-------------------------------------------------------------------
+Fri Oct 10 12:15:36 CEST 2014 - aschnell@suse.de
+
+- improved fadvise usage
+
+-------------------------------------------------------------------
+Fri Oct 3 01:05:01 CEST 2014 - dsterba@suse.cz
+
+- add option --all-configs to snapper client, list snapshots from
+  all accessible configs
+
+-------------------------------------------------------------------
+Thu Oct 02 14:46:37 CEST 2014 - aschnell@suse.de
+
+- allow to specify command for comparing file
+
+-------------------------------------------------------------------
+Mon Sep 29 11:55:37 CEST 2014 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Wed Sep 24 15:29:51 CEST 2014 - aschnell@suse.de
+
+- resolved some code issues found by code analysis
+
+-------------------------------------------------------------------
+Wed Aug 27 17:55:32 CEST 2014 - dsterba@suse.cz
+
+- conditional check for libbtrfs API version
+- version 0.2.4
+
+-------------------------------------------------------------------
+Thu Aug 14 14:15:21 CEST 2014 - aschnell@suse.de
+
+- cleanup after failed create-config (bnc#863578)
+
+-------------------------------------------------------------------
+Thu Jul 31 15:38:16 CEST 2014 - aschnell@suse.de
+
+- also handle primary group of user when checking permissions
+  (see gh#openSUSE/snapper#100)
+- show id of user if username cannot be detected
+
+-------------------------------------------------------------------
+Fri Jul 25 12:38:33 CEST 2014 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Tue Jul 22 10:26:09 CEST 2014 - aschnell@suse.de
+
+- disable support for qgroup (see bug#887046)
+
+-------------------------------------------------------------------
+Fri Jul 04 11:02:06 CEST 2014 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Thu Jul 03 10:45:35 CEST 2014 - aschnell@suse.de
+
+- fixed pam_snapper_pamconfig.sh script (bnc#885604)
+
+-------------------------------------------------------------------
+Mon Jun 30 15:43:56 CEST 2014 - aschnell@suse.de
+
+- make rollback command print verbose messages
+
+-------------------------------------------------------------------
+Mon Jun 30 14:44:25 CEST 2014 - aschnell@suse.de
+
+- allow to add snapshots to qgroup (prototype for fate#312751)
+
+-------------------------------------------------------------------
+Mon Jun 23 09:19:03 CEST 2014 - aschnell@suse.de
+
+- fixed DBus introspection data
+- version 0.2.3
+
+-------------------------------------------------------------------
+Mon Jun 02 14:54:29 CEST 2014 - aschnell@suse.de
+
+- added aliases for some snapper commands
+
+-------------------------------------------------------------------
+Tue May 27 11:36:21 CEST 2014 - aschnell@suse.de
+
+- allow to display dates and times in UTC and ISO format
+
+-------------------------------------------------------------------
+Tue May 20 16:24:10 CEST 2014 - aschnell@suse.de
+
+- extended documentation about "number" cleanup algorithm
+  (bnc#878009)
+
+-------------------------------------------------------------------
+Mon May 05 12:27:17 CEST 2014 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Thu Apr 17 15:00:25 CEST 2014 - aschnell@suse.de
+
+- fixed parent of snapshot generated by rollback
+
+-------------------------------------------------------------------
+Thu Apr 10 10:17:49 CEST 2014 - aschnell@suse.de
+
+- added rollback support (fate#317062)
+- version 0.2.2
+
+-------------------------------------------------------------------
+Thu Apr 03 17:49:12 CEST 2014 - aschnell@suse.de
+
+- fixed execution of grub plugin (bnc#871880)
+
+-------------------------------------------------------------------
+Tue Apr 01 20:04:33 CEST 2014 - aschnell@suse.de
+
+- allow to add snapshots subvolume to fstab (for fate#317062)
+
+-------------------------------------------------------------------
+Mon Mar 03 17:20:41 CET 2014 - aschnell@suse.de
+
+- fixed empty-pre-post cleanup algorithm
+
+-------------------------------------------------------------------
+Fri Feb 28 11:47:22 CET 2014 - aschnell@suse.de
+
+- fixed setting setuid bit during undochange (bnc#862964)
+
+-------------------------------------------------------------------
+Thu Feb 20 15:04:30 CET 2014 - aschnell@suse.de
+
+- fixed segmentation fault with DBus (bnc#860119)
+
+-------------------------------------------------------------------
+Thu Feb 20 14:18:01 CET 2014 - aschnell@suse.de
+
+- updated zypp-plugin.conf (bnc#864841)
+
+-------------------------------------------------------------------
+Tue Feb 11 14:08:06 CET 2014 - aschnell@suse.de
+
+- sync ACL at startup (bnc#863073)
+
+-------------------------------------------------------------------
+Wed Feb 05 10:50:25 CET 2014 - aschnell@suse.de
+
+- fixed execution of grub scripts
+- version 0.2.1
+
+-------------------------------------------------------------------
+Wed Jan 29 11:09:45 CET 2014 - aschnell@suse.de
+
+- allow to sync ALLOW_USERS and ALLOW_GROUPS to ACL of .snapshots
+  directory (see bnc#860116)
+- version 0.2.0
+
+-------------------------------------------------------------------
+Fri Jan 24 10:01:35 CET 2014 - aschnell@suse.de
+
+- removed grub-snapper-plugin subpackage (fate#316232)
+
+-------------------------------------------------------------------
+Fri Dec 13 16:10:42 CET 2013 - aschnell@suse.de
+
+- tag subpackages containing only Python plugins as noarch
+
+-------------------------------------------------------------------
+Mon Nov 25 11:38:43 CET 2013 - aschnell@suse.de
+
+- allow to configure snapshotting from zypp-plugin depending on
+  package list (fate#316203)
+- version 0.1.8
+
+-------------------------------------------------------------------
+Mon Oct 21 10:24:43 CEST 2013 - aschnell@suse.de
+
+- fixed inconsistency with default value for BACKGROUND_COMPARISON
+
+-------------------------------------------------------------------
+Thu Oct 17 10:17:59 CEST 2013 - aschnell@suse.de
+
+- extended number cleanup algorithm to privilege important
+  snapshots (fate#316233)
+
+-------------------------------------------------------------------
+Tue Oct 15 16:28:15 CEST 2013 - aschnell@suse.de
+
+- added grub-snapper-plugin subpackage for writing extra snapshot
+  metadata for grub2 (fate#316232)
+
+-------------------------------------------------------------------
 Tue Oct 01 15:46:19 CEST 2013 - aschnell@suse.de
 
 - restrict permissions on .snapshots subvolume (bnc#843219)
-- 0.1.7
+- version 0.1.7
 
 -------------------------------------------------------------------
 Mon Sep 30 14:20:22 CEST 2013 - aschnell@suse.de
@@ -13,7 +328,7 @@ Mon Sep 30 14:20:22 CEST 2013 - aschnell@suse.de
 Fri Sep 06 16:02:47 CEST 2013 - aschnell@suse.de
 
 - added option --no-dbus to snapper tool
-- 0.1.6
+- version 0.1.6
 
 -------------------------------------------------------------------
 Thu Jul 25 14:40:31 CEST 2013 - aschnell@suse.de
@@ -26,7 +341,7 @@ Tue Jul 09 14:00:16 CEST 2013 - aschnell@suse.de
 - added manpage describing snapper configs
 - optimize timeline cleanup algorithm for only sporadic running
   systems
-- 0.1.5
+- version 0.1.5
 
 -------------------------------------------------------------------
 Mon Jul 08 16:18:10 CEST 2013 - aschnell@suse.de

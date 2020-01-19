@@ -19,8 +19,7 @@ AC_CONFIG_HEADERS(config.h)
 AC_DISABLE_STATIC
 
 AC_PROG_CXX
-AC_PROG_LIBTOOL
-AM_PROG_LIBTOOL
+LT_INIT
 
 AC_PREFIX_DEFAULT(/usr)
 
@@ -103,6 +102,7 @@ AC_ARG_ENABLE([zypp], AC_HELP_STRING([--disable-zypp],[Disable zypp plugin suppo
 AM_CONDITIONAL(HAVE_ZYPP, [test "x$with_zypp" = "xyes"])
 
 AC_CHECK_LIB(btrfs, btrfs_read_and_process_send_stream)
+AC_CHECK_HEADERS([btrfs/version.h])
 
 AC_ARG_ENABLE([xattrs], AC_HELP_STRING([--disable-xattrs],[Disable extended attributes support]),
 		[with_xattrs=$enableval],[with_xattrs=yes])
@@ -112,11 +112,31 @@ if test "x$with_xattrs" = "xyes"; then
 	AC_DEFINE(ENABLE_XATTRS, 1, [Enable extended attributes support])
 fi
 
+AC_ARG_ENABLE([rollback], AC_HELP_STRING([--disable-rollback],[Disable rollback support]),
+		[enable_rollback=$enableval],[enable_rollback=yes])
+AM_CONDITIONAL(ENABLE_ROLLBACK, [test "x$enable_rollback" = "xyes"])
+
+if test "x$enable_rollback" = "xyes"; then
+	AC_DEFINE(ENABLE_ROLLBACK, 1, [Enable rollback support])
+        # libmount is needed for rollback feature
+        AC_CHECK_HEADER(libmount/libmount.h,[],[AC_MSG_ERROR([Cannout find libmount headers. Please install libmount-devel])])
+fi
+
+AC_ARG_ENABLE([btrfs-quota], AC_HELP_STRING([--disable-btrfs-quota],[Disable btrfs quota support]),
+		[enable_btrfs_quota=$enableval],[enable_btrfs_quota=yes])
+AM_CONDITIONAL(ENABLE_BTRFS_QUOTA, [test "x$enable_btrfs_quota" = "xyes"])
+
+if test "x$enable_btrfs_quota" = "xyes"; then
+	AC_DEFINE(ENABLE_BTRFS_QUOTA, 1, [Enable btrfs quota support])
+fi
+
 AC_ARG_ENABLE([pam], AC_HELP_STRING([--disable-pam],[Disable pam plugin support]),
                 [with_pam=$enableval],[with_pam=yes])
 AM_CONDITIONAL(HAVE_PAM, [test "x$with_pam" = "xyes"])
 
 PKG_CHECK_MODULES(DBUS, dbus-1)
+
+AC_CHECK_HEADER(acl/libacl.h,[],[AC_MSG_ERROR([Cannout find libacl headers. Please install libacl-devel])])
 
 AC_SUBST(VERSION)
 AC_SUBST(LIBVERSION_MAJOR)
@@ -144,6 +164,8 @@ AC_OUTPUT(
 	doc/snapper.xml:doc/snapper.xml.in
 	doc/snapperd.xml:doc/snapperd.xml.in
 	doc/snapper-configs.xml:doc/snapper-configs.xml.in
+	doc/snapper-zypp-plugin.xml:doc/snapper-zypp-plugin.xml.in
+	doc/snapper-zypp-plugin.conf.xml:doc/snapper-zypp-plugin.conf.xml.in
 	doc/pam_snapper.xml:doc/pam_snapper.xml.in
 	po/Makefile
 	testsuite/Makefile

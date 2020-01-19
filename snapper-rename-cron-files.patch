@@ -1,5 +1,6 @@
---- a/scripts/Makefile.am	2013-07-12 10:47:19.000000000 +0200
-+++ b/scripts/Makefile.am	2013-07-29 12:49:49.505908078 +0200
+diff -rupN snapper-0.2.8.old/scripts/Makefile.am snapper-0.2.8/scripts/Makefile.am
+--- snapper-0.2.8.old/scripts/Makefile.am	2016-06-21 17:17:06.558090949 +0200
++++ snapper-0.2.8/scripts/Makefile.am	2016-06-21 17:19:14.419995276 +0200
 @@ -17,8 +17,8 @@ endif
  EXTRA_DIST = snapper-hourly snapper-daily zypp-plugin.py $(pam_snapper_SCRIPTS)
  
@@ -8,6 +9,6 @@
 -	install -D snapper-daily $(DESTDIR)/etc/cron.daily/suse.de-snapper
 +	install -D snapper-hourly $(DESTDIR)/etc/cron.hourly/snapper
 +	install -D snapper-daily $(DESTDIR)/etc/cron.daily/snapper
+ 
  if HAVE_ZYPP
  	install -D zypp-plugin.py $(DESTDIR)/usr/lib/zypp/plugins/commit/snapper.py
- endif

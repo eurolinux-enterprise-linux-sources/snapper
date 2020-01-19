@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Novell, Inc.
+ * Copyright (c) [2011-2014] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -20,37 +20,18 @@
  */
 
 
-#include <memory>
+bool
+equal_year(const struct tm& tmp1, const struct tm& tmp2);
 
-#include "snapper/Factory.h"
-#include "snapper/Snapper.h"
-#include "snapper/Exception.h"
+bool
+equal_month(const struct tm& tmp1, const struct tm& tmp2);
 
+bool
+equal_week(const struct tm& tmp1, const struct tm& tmp2);
 
-namespace snapper
-{
+bool
+equal_day(const struct tm& tmp1, const struct tm& tmp2);
 
-    std::auto_ptr<Snapper> the_one;
+bool
+equal_hour(const struct tm& tmp1, const struct tm& tmp2);
 
-
-    Snapper*
-    createSnapper(const string& config_name, bool disable_filters)
-    {
-	if (the_one.get())
-	    throw LogicErrorException();
-
-	the_one.reset(new Snapper(config_name, disable_filters));
-	return the_one.get();
-    }
-
-
-    void
-    deleteSnapper(Snapper* s)
-    {
-	if (!the_one.get() || s != the_one.get())
-	    throw LogicErrorException();
-
-	the_one.reset();
-    }
-
-}

@@ -1,0 +1,908 @@
+From c27277e7ab5dbec460f313685ad619e05d706b70 Mon Sep 17 00:00:00 2001
+From: Ondrej Kozina <okozina@redhat.com>
+Date: Mon, 11 Apr 2016 17:10:28 +0200
+Subject: [PATCH] SELinux support
+
+Try to sync SELinux contexts on snapperd metadata. That includes
+btrfs subvolumes and directory path for other filesystems on top
+of thin LVs using LVM2 backend
+---
+ configure.ac         |  10 +++
+ snapper/Btrfs.cc     |  17 +++++
+ snapper/FileUtils.cc | 184 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ snapper/FileUtils.h  |   9 +++
+ snapper/Lvm.cc       |  73 ++++++++++++++++++--
+ snapper/Lvm.h        |   3 +
+ snapper/Makefile.am  |   5 ++
+ snapper/Selinux.cc   | 157 +++++++++++++++++++++++++++++++++++++++++++
+ snapper/Selinux.h    |  86 ++++++++++++++++++++++++
+ snapper/Snapper.cc   |  93 +++++++++++++++++++++++++-
+ snapper/Snapper.h    |   7 ++
+ 11 files changed, 637 insertions(+), 7 deletions(-)
+ create mode 100644 snapper/Selinux.cc
+ create mode 100644 snapper/Selinux.h
+
+diff --git a/configure.ac b/configure.ac
+index c8b4470..41bab8f 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -134,6 +134,16 @@ AC_ARG_ENABLE([pam], AC_HELP_STRING([--disable-pam],[Disable pam plugin support]
+                 [with_pam=$enableval],[with_pam=yes])
+ AM_CONDITIONAL(HAVE_PAM, [test "x$with_pam" = "xyes"])
+ 
++AC_ARG_ENABLE([selinux], AC_HELP_STRING([--enable-selinux],[Enable support for SELinux LSM]),
++		[with_selinux=$enableval],[with_selinux=no])
++AM_CONDITIONAL(ENABLE_SELINUX, [test "x$enable_selinux" = "xyes"])
++
++if test "x$with_selinux" = "xyes"; then
++	AC_DEFINE(ENABLE_SELINUX, 1, [Enable SELinux support])
++	AC_CHECK_HEADER(selinux/selinux.h,[],[AC_MSG_ERROR([Cannot find libselinux headers. Please install libselinux-devel])])
++	AC_CHECK_LIB(selinux, selinux_snapperd_contexts_path, [], [AC_MSG_ERROR([selinux library does not provide selinux_snapperd_contexts_path symbol])])
++fi
++
+ PKG_CHECK_MODULES(DBUS, dbus-1)
+ 
+ AC_CHECK_HEADER(acl/libacl.h,[],[AC_MSG_ERROR([Cannout find libacl headers. Please install libacl-devel])])
+diff --git a/snapper/Btrfs.cc b/snapper/Btrfs.cc
+index bf5560e..21bf67b 100644
+--- a/snapper/Btrfs.cc
++++ b/snapper/Btrfs.cc
+@@ -56,6 +56,10 @@
+ #include "snapper/SnapperTmpl.h"
+ #include "snapper/SnapperDefines.h"
+ #include "snapper/Acls.h"
++#include "snapper/Exception.h"
++#ifdef ENABLE_SELINUX
++#include "snapper/Selinux.h"
++#endif
+ 
+ 
+ namespace snapper
+@@ -114,6 +118,19 @@ namespace snapper
+ 	}
+ 
+ 	SFile x(subvolume_dir, ".snapshots");
++#ifdef ENABLE_SELINUX
++	try
++	{
++	    SnapperContexts scontexts;
++
++	    x.fsetfilecon(scontexts.subvolume_context());
++	}
++	catch (const SelinuxException& e)
++	{
++	    y2war("Failed to sync SELinux context on subvolume: " << e.what());
++	    // fall through intentional
++	}
++#endif
+ 	struct stat stat;
+ 	if (x.stat(&stat, 0) == 0)
+ 	    x.chmod(stat.st_mode & ~0027, 0);
+diff --git a/snapper/FileUtils.cc b/snapper/FileUtils.cc
+index 78ff7a3..6e84f50 100644
+--- a/snapper/FileUtils.cc
++++ b/snapper/FileUtils.cc
+@@ -34,12 +34,18 @@
+ #include <errno.h>
+ #include <stdlib.h>
+ #include <assert.h>
++#ifdef ENABLE_SELINUX
++#include <selinux/selinux.h>
++#endif
+ #include <algorithm>
+ 
+ #include "snapper/FileUtils.h"
+ #include "snapper/AppUtil.h"
+ #include "snapper/Log.h"
+ #include "snapper/Exception.h"
++#ifdef ENABLE_SELINUX
++#include "snapper/Selinux.h"
++#endif
+ 
+ 
+ namespace snapper
+@@ -585,6 +591,171 @@ namespace snapper
+     }
+ 
+ 
++    bool
++    SDir::fsetfilecon(const string& name, char* con) const
++    {
++	assert(name.find('/') == string::npos);
++	assert(name != "..");
++
++	bool retval = true;
++
++#ifdef ENABLE_SELINUX
++	if (_is_selinux_enabled())
++	{
++	    char *src_con = NULL;
++
++	    int fd = ::openat(dirfd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_NOATIME
++			      | O_NONBLOCK | O_CLOEXEC);
++	    if (fd < 0)
++	    {
++		// symlink, detached dev node?
++		if (errno != ELOOP && errno != ENXIO && errno != EWOULDBLOCK)
++		{
++		    y2err("open failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    return false;
++		}
++
++		boost::lock_guard<boost::mutex> lock(cwd_mutex);
++
++		if (fchdir(dirfd) < 0)
++		{
++		    y2err("fchdir failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    return false;
++		}
++
++		if (lgetfilecon(name.c_str(), &src_con) < 0 || selinux_file_context_cmp(src_con, con))
++		{
++		    y2deb("setting new SELinux context on " << fullname() << "/" << name);
++		    if (lsetfilecon(name.c_str(), con))
++		    {
++			y2err("lsetfilecon on " << fullname() << "/" << name << " failed errno: " << errno << " (" << stringerror(errno) << ")");
++			retval = false;
++		    }
++		}
++
++		chdir("/");
++
++	    }
++	    else
++	    {
++		if (fgetfilecon(fd, &src_con) < 0 || selinux_file_context_cmp(src_con, con))
++		{
++		    y2deb("setting new SELinux context on " << fullname() << "/" << name);
++		    if (::fsetfilecon(fd, con))
++		    {
++			y2err("fsetfilecon on " << fullname() << "/" << name << " failed errno: " << errno << " (" << stringerror(errno) << ")");
++			retval = false;
++		    }
++		}
++
++		::close(fd);
++	    }
++
++	    freecon(src_con);
++	}
++#endif
++	return retval;
++    }
++
++
++    bool
++    SDir::restorecon(const string& name, SelinuxLabelHandle* sh) const
++    {
++	assert(name.find('/') == string::npos);
++	assert(name != "..");
++
++	bool retval = true;
++#ifdef ENABLE_SELINUX
++	if (_is_selinux_enabled())
++	{
++	    assert(sh);
++
++	    struct stat buf;
++	    if (stat(name, &buf, AT_SYMLINK_NOFOLLOW))
++	    {
++		y2err("Failed to stat " << fullname() << "/" << name);
++		return false;
++	    }
++
++	    char* con = sh->selabel_lookup(fullname() + "/" + name, buf.st_mode);
++	    if (con)
++	    {
++		retval = fsetfilecon(name, con);
++	    }
++	    else
++	    {
++		retval = false;
++	    }
++
++	    freecon(con);
++	}
++#endif
++	return retval;
++    }
++
++
++    bool
++    SDir::fsetfilecon(char* con) const
++    {
++	bool retval = true;
++
++#ifdef ENABLE_SELINUX
++	if (_is_selinux_enabled())
++	{
++	    char* src_con = NULL;
++
++	    if (fgetfilecon(fd(), &src_con) < 0 || selinux_file_context_cmp(src_con, con))
++	    {
++		y2deb("setting new SELinux context on " << fullname());
++		if (::fsetfilecon(fd(), con))
++		{
++		    y2err("fsetfilecon on " << fullname() << " failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    retval = false;
++		}
++	    }
++
++	    freecon(src_con);
++	}
++#endif
++	return retval;
++    }
++
++
++    bool
++    SDir::restorecon(SelinuxLabelHandle* sh) const
++    {
++	bool retval = true;
++#ifdef ENABLE_SELINUX
++	if (_is_selinux_enabled())
++	{
++	    assert(sh);
++
++	    struct stat buf;
++
++	    if (stat(&buf))
++	    {
++		y2err("Failed to stat " << fullname());
++		return false;
++	    }
++
++	    char* con = sh->selabel_lookup(fullname(), buf.st_mode);
++	    if (con)
++	    {
++		retval = fsetfilecon(con);
++	    }
++	    else
++	    {
++		y2war("can't get proper label for path:" << fullname());
++		retval = false;
++	    }
++
++	    freecon(con);
++	}
++#endif
++	return retval;
++    }
++
++
+     SFile::SFile(const SDir& dir, const string& name)
+ 	: dir(dir), name(name)
+     {
+@@ -649,6 +820,19 @@ namespace snapper
+     }
+ 
+ 
++    void
++    SFile::fsetfilecon(char* con) const
++    {
++	dir.fsetfilecon(name, con);
++    }
++
++    void
++    SFile::restorecon(SelinuxLabelHandle* sh) const
++    {
++	dir.restorecon(name, sh);
++    }
++
++
+     TmpDir::TmpDir(SDir& base_dir, const string& name_template)
+ 	: base_dir(base_dir), name(name_template)
+     {
+diff --git a/snapper/FileUtils.h b/snapper/FileUtils.h
+index f35a0ac..988031c 100644
+--- a/snapper/FileUtils.h
++++ b/snapper/FileUtils.h
+@@ -42,6 +42,7 @@ namespace snapper
+ 	XA_SUPPORTED
+     };
+ 
++    class SelinuxLabelHandle;
+ 
+     /*
+      * The member functions of SDir and SFile are secure (avoid race
+@@ -101,6 +102,11 @@ namespace snapper
+ 		   const string& mount_data) const;
+ 	bool umount(const string& mount_point) const;
+ 
++	bool fsetfilecon(const string& name, char* con) const;
++	bool fsetfilecon(char* con) const;
++	bool restorecon(SelinuxLabelHandle* sh) const;
++	bool restorecon(const string& name, SelinuxLabelHandle* sh) const;
++
+     private:
+ 
+ 	XaAttrsStatus xastatus;
+@@ -134,6 +140,9 @@ namespace snapper
+ 	ssize_t listxattr(char* list, size_t size) const;
+ 	ssize_t getxattr(const char* name, void* value, size_t size) const;
+ 
++	void fsetfilecon(char* con) const;
++	void restorecon(SelinuxLabelHandle* sh) const;
++
+     private:
+ 
+ 	const SDir& dir;
+diff --git a/snapper/Lvm.cc b/snapper/Lvm.cc
+index 790c85b..4955df5 100644
+--- a/snapper/Lvm.cc
++++ b/snapper/Lvm.cc
+@@ -41,6 +41,9 @@
+ #include "snapper/SnapperDefines.h"
+ #include "snapper/Regex.h"
+ #include "snapper/LvmCache.h"
++#ifdef ENABLE_SELINUX
++#include "snapper/Selinux.h"
++#endif
+ 
+ 
+ namespace snapper
+@@ -60,7 +63,7 @@ namespace snapper
+     Lvm::Lvm(const string& subvolume, const string& root_prefix, const string& mount_type)
+ 	: Filesystem(subvolume, root_prefix), mount_type(mount_type),
+ 	  caps(LvmCapabilities::get_lvm_capabilities()),
+-	  cache(LvmCache::get_lvm_cache())
++	  cache(LvmCache::get_lvm_cache()), sh(NULL)
+     {
+ 	if (access(LVCREATEBIN, X_OK) != 0)
+ 	{
+@@ -98,15 +101,18 @@ namespace snapper
+ 	    mount_options.push_back("nouuid");
+ 	    mount_options.push_back("norecovery");
+ 	}
++
++#ifdef ENABLE_SELINUX
++	sh = SelinuxLabelHandle::get_selinux_handle();
++#endif
++
+     }
+ 
+ 
+     void
+-    Lvm::createConfig() const
++    Lvm::createLvmConfig(const SDir& subvolume_dir, int mode) const
+     {
+-	SDir subvolume_dir = openSubvolumeDir();
+-
+-	int r1 = subvolume_dir.mkdir(".snapshots", 0750);
++	int r1 = subvolume_dir.mkdir(".snapshots", mode);
+ 	if (r1 != 0 && errno != EEXIST)
+ 	{
+ 	    y2err("mkdir failed errno:" << errno << " (" << strerror(errno) << ")");
+@@ -116,6 +122,63 @@ namespace snapper
+ 
+ 
+     void
++    Lvm::createConfig() const
++    {
++	int mode = 0750;
++	SDir subvolume_dir = openSubvolumeDir();
++
++#ifdef ENABLE_SELINUX
++	if (_is_selinux_enabled())
++	{
++	    assert(sh);
++
++	    char* con = NULL;
++
++	    try
++	    {
++		string path(subvolume_dir.fullname() + "/.snapshots");
++
++		con = sh->selabel_lookup(path, mode);
++		if (con)
++		{
++		    // race free mkdir with correct Selinux context preset
++		    DefaultSelinuxFileContext defcon(con);
++		    createLvmConfig(subvolume_dir, mode);
++		}
++		else
++		{
++		    y2deb("SELinux policy does not define context for path: " << path);
++
++		    // race free mkdir with correct Selinux context preset even in case
++		    // Selinux policy does not define context for the path
++		    SnapperContexts scontexts;
++		    DefaultSelinuxFileContext defcon(scontexts.subvolume_context());
++
++		    createLvmConfig(subvolume_dir, mode);
++		}
++
++		freecon(con);
++
++		return;
++	    }
++	    catch (const SelinuxException& e)
++	    {
++		y2war("Failed to sync SELinux contexts: " << e.what());
++		freecon(con);
++		// fall through intentional
++	    }
++	    catch (const CreateConfigFailedException& e)
++	    {
++		freecon(con);
++		throw;
++	    }
++	}
++#endif
++	createLvmConfig(subvolume_dir, mode);
++    }
++
++
++    void
+     Lvm::deleteConfig() const
+     {
+ 	SDir subvolume_dir = openSubvolumeDir();
+diff --git a/snapper/Lvm.h b/snapper/Lvm.h
+index 87193ad..c3eba58 100644
+--- a/snapper/Lvm.h
++++ b/snapper/Lvm.h
+@@ -73,6 +73,7 @@ namespace snapper
+ 	bool time_support;
+     };
+ 
++    class SelinuxLabelHandle;
+ 
+     class Lvm : public Filesystem
+     {
+@@ -111,11 +112,13 @@ namespace snapper
+ 	const string mount_type;
+ 	const LvmCapabilities* caps;
+ 	LvmCache* cache;
++	SelinuxLabelHandle* sh;
+ 
+ 	bool detectThinVolumeNames(const MtabData& mtab_data);
+ 	void activateSnapshot(const string& vg_name, const string& lv_name) const;
+ 	void deactivateSnapshot(const string& vg_name, const string& lv_name) const;
+ 	bool detectInactiveSnapshot(const string& vg_name, const string& lv_name) const;
++	void createLvmConfig(const SDir& subvolume_dir, int mode) const;
+ 
+ 	string getDevice(unsigned int num) const;
+ 
+diff --git a/snapper/Makefile.am b/snapper/Makefile.am
+index 77728d7..4f10ea2 100644
+--- a/snapper/Makefile.am
++++ b/snapper/Makefile.am
+@@ -52,6 +52,11 @@ libsnapper_la_SOURCES +=				\
+ endif
+ 
+ 
++if ENABLE_SELINUX
++libsnapper_la_SOURCES +=				\
++	Selinux.cc		Selinux.h
++endif
++
+ libsnapper_la_LDFLAGS = -version-info @LIBVERSION_INFO@
+ libsnapper_la_LIBADD = -lboost_thread -lboost_system -lxml2 -lacl -lz -lm
+ if ENABLE_ROLLBACK
+diff --git a/snapper/Selinux.cc b/snapper/Selinux.cc
+new file mode 100644
+index 0000000..25f9bb5
+--- /dev/null
++++ b/snapper/Selinux.cc
+@@ -0,0 +1,157 @@
++/*
++ * Copyright (c) [2016] Red Hat, Inc.
++ *
++ * All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of version 2 of the GNU General Public License as published
++ * by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, contact Novell, Inc.
++ *
++ * To contact Novell about this file by physical or electronic mail, you may
++ * find current contact information at www.novell.com.
++ */
++
++#include <cerrno>
++#include <map>
++
++#include <boost/algorithm/string.hpp>
++
++#include "snapper/AppUtil.h"
++#include "snapper/AsciiFile.h"
++#include "snapper/Log.h"
++#include "snapper/Selinux.h"
++
++namespace snapper
++{
++
++    SnapperContexts::SnapperContexts()
++	: subvolume_ctx(NULL)
++    {
++	std::map<string,string> snapperd_contexts;
++
++	try
++	{
++	    AsciiFileReader asciifile(selinux_snapperd_contexts_path());
++
++	    string line;
++	    while (asciifile.getline(line))
++	    {
++		// commented line
++		if (line[0] == '#')
++		    continue;
++
++		// do not parse lines w/o '=' symbol
++		string::size_type pos = line.find('=');
++		if (pos == string::npos)
++		    continue;
++
++		if (!snapperd_contexts.insert(make_pair(boost::trim_copy(line.substr(0, pos)), boost::trim_copy(line.substr(pos + 1)))).second)
++		{
++		    throw SelinuxException("Duplicate key in contexts file");
++		}
++	    }
++	}
++	catch (const FileNotFoundException& e)
++	{
++	    throw SelinuxException("Failed to parse contexts file");
++	}
++
++	std::map<string,string>::const_iterator cit = snapperd_contexts.find(selinux_snapperd_data);
++	if (cit == snapperd_contexts.end())
++	{
++	    throw SelinuxException("Snapperd data context not found");
++	}
++
++	subvolume_ctx = context_new(cit->second.c_str());
++	if (!subvolume_ctx)
++	{
++	    throw SelinuxException();
++	}
++    }
++
++
++    DefaultSelinuxFileContext::DefaultSelinuxFileContext(char* context)
++    {
++	if (setfscreatecon(context) < 0)
++	{
++	    const string s = "setfscreatecon(" + string(context) + ") failed";
++	    throw SelinuxException(s.c_str());
++	}
++    }
++
++
++    DefaultSelinuxFileContext::~DefaultSelinuxFileContext()
++    {
++	if (setfscreatecon(NULL))
++	    y2err("Failed to reset default file system objects context");
++    }
++
++
++    SelinuxLabelHandle::SelinuxLabelHandle()
++	: handle(selabel_open(SELABEL_CTX_FILE, NULL, 0))
++    {
++	if (!handle)
++	{
++	    const string s = "Failed to open SELinux labeling handle: " + stringerror(errno);
++	    throw SelinuxException(s.c_str());
++	}
++    }
++
++
++    char*
++    SelinuxLabelHandle::selabel_lookup(const string& path, int mode)
++    {
++	char *con;
++
++	if (!::selabel_lookup(handle, &con, path.c_str(), mode))
++	{
++	    y2deb("found label for path " << path << ": " << con);
++	    return con;
++	}
++	else
++	{
++	    if (errno == ENOENT)
++		y2deb("Selinux context not defined for path " << path);
++
++	    return NULL;
++	}
++    }
++
++
++    bool
++    _is_selinux_enabled()
++    {
++	static bool selinux_enabled, selinux_checked = false;
++
++	if (!selinux_checked)
++	{
++	    selinux_enabled = (is_selinux_enabled() == 1); // may return -1 on error
++	    selinux_checked = true;
++	    y2mil("Selinux support " << (selinux_enabled ? "en" : "dis") << "abled");
++	}
++
++	return selinux_enabled;
++    }
++
++
++    SelinuxLabelHandle*
++    SelinuxLabelHandle::get_selinux_handle()
++    {
++	if (_is_selinux_enabled())
++	{
++	    static SelinuxLabelHandle handle;
++	    return &handle;
++	}
++
++	return NULL;
++    }
++
++}
+diff --git a/snapper/Selinux.h b/snapper/Selinux.h
+new file mode 100644
+index 0000000..9095ac4
+--- /dev/null
++++ b/snapper/Selinux.h
+@@ -0,0 +1,86 @@
++/*
++ * Copyright (c) [2016] Red Hat, Inc.
++ *
++ * All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of version 2 of the GNU General Public License as published
++ * by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, contact Novell, Inc.
++ *
++ * To contact Novell about this file by physical or electronic mail, you may
++ * find current contact information at www.novell.com.
++ */
++
++
++#ifndef SNAPPER_SELINUX_H
++#define SNAPPER_SELINUX_H
++
++#include <string>
++#include <selinux/context.h>
++#include <selinux/label.h>
++#include <selinux/selinux.h>
++
++#include <boost/noncopyable.hpp>
++
++#include "snapper/Exception.h"
++
++
++namespace snapper {
++
++    struct SelinuxException : public SnapperException
++    {
++	explicit SelinuxException() throw() : msg("SELinux error") {}
++	explicit SelinuxException(const char* msg) throw() : msg(msg) {}
++	virtual const char* what() const throw() { return msg; }
++	const char* msg;
++    };
++
++    using std::string;
++
++    const static string selinux_snapperd_data = "snapperd_data";
++
++    bool _is_selinux_enabled();
++
++    class SnapperContexts
++    {
++    public:
++	char* subvolume_context() const { return context_str(subvolume_ctx); }
++	SnapperContexts();
++	~SnapperContexts() { context_free(subvolume_ctx); }
++    private:
++	context_t subvolume_ctx;
++    };
++
++    class DefaultSelinuxFileContext : private boost::noncopyable
++    {
++    public:
++	DefaultSelinuxFileContext(char* context);
++	~DefaultSelinuxFileContext();
++    };
++
++
++    class SelinuxLabelHandle : public boost::noncopyable
++    {
++    public:
++	static SelinuxLabelHandle* get_selinux_handle();
++
++	char* selabel_lookup(const string& path, int mode);
++
++	~SelinuxLabelHandle() { selabel_close(handle); }
++    private:
++	SelinuxLabelHandle();
++
++	struct selabel_handle* handle;
++    };
++
++}
++
++#endif
+diff --git a/snapper/Snapper.cc b/snapper/Snapper.cc
+index c17e018..bc08658 100644
+--- a/snapper/Snapper.cc
++++ b/snapper/Snapper.cc
+@@ -44,6 +44,10 @@
+ #include "snapper/AsciiFile.h"
+ #include "snapper/Exception.h"
+ #include "snapper/Hooks.h"
++#ifdef ENABLE_SELINUX
++#include "snapper/Selinux.h"
++#include "snapper/Regex.h"
++#endif
+ 
+ 
+ namespace snapper
+@@ -78,12 +82,16 @@ namespace snapper
+ 
+ 
+     Snapper::Snapper(const string& config_name, const string& root_prefix, bool disable_filters)
+-	: config_info(NULL), filesystem(NULL), snapshots(this)
++	: config_info(NULL), filesystem(NULL), snapshots(this), selabel_handle(NULL)
+     {
+ 	y2mil("Snapper constructor");
+ 	y2mil("libsnapper version " VERSION);
+ 	y2mil("config_name:" << config_name << " disable_filters:" << disable_filters);
+ 
++#ifdef ENABLE_SELINUX
++	selabel_handle = SelinuxLabelHandle::get_selinux_handle();
++#endif
++
+ 	try
+ 	{
+ 	    config_info = new ConfigInfo(config_name, root_prefix);
+@@ -95,6 +103,9 @@ namespace snapper
+ 
+ 	filesystem = Filesystem::create(*config_info, root_prefix);
+ 
++	// With btrfs backend, it's useless try syncing snapshot RO subvolumes
++	syncSelinuxContexts(filesystem->fstype() == "btrfs");
++
+ 	bool sync_acl;
+ 	if (config_info->getValue(KEY_SYNC_ACL, sync_acl) && sync_acl == true)
+ 	    syncAcl();
+@@ -623,6 +634,79 @@ namespace snapper
+     }
+ 
+ 
++    void
++    Snapper::syncSelinuxContexts(bool skip_snapshot_dir) const
++    {
++#ifdef ENABLE_SELINUX
++	try
++	{
++	    SDir subvol_dir = openSubvolumeDir();
++	    SDir infos_dir(subvol_dir, ".snapshots");
++
++	    if (infos_dir.restorecon(selabel_handle))
++	    {
++		syncSelinuxContextsInInfosDir(skip_snapshot_dir);
++	    }
++	    else
++	    {
++		SnapperContexts scons;
++
++		if (infos_dir.fsetfilecon(scons.subvolume_context()))
++		    syncSelinuxContextsInInfosDir(skip_snapshot_dir);
++	    }
++	}
++	catch (const SelinuxException& e)
++	{
++	    y2war("Failed to sync SELinux contexts: " << e.what());
++	    // fall through intentional
++	}
++#endif
++    }
++
++
++    void
++    Snapper::syncSelinuxContextsInInfosDir(bool skip_snapshot_dir) const
++    {
++#ifdef ENABLE_SELINUX
++	Regex rx("^[0-9]+$");
++	Regex rx_filelist("^filelist-[0-9]+.txt$");
++
++	y2deb("Syncing SELinux contexts in infos dir");
++
++	SDir infos_dir = openInfosDir();
++
++	vector<string> infos = infos_dir.entries();
++	for (vector<string>::const_iterator it1 = infos.begin(); it1 != infos.end(); ++it1)
++	{
++	    if (!rx.match(*it1))
++		continue;
++
++	    SDir info_dir(infos_dir, *it1);
++	    info_dir.restorecon(selabel_handle);
++
++	    SFile info(info_dir, "info.xml");
++	    info.restorecon(selabel_handle);
++
++	    if (!skip_snapshot_dir)
++	    {
++		SFile snapshot_dir(info_dir, "snapshot");
++		snapshot_dir.restorecon(selabel_handle);
++	    }
++
++	    vector<string> info_content = info_dir.entries();
++	    for (vector<string>::const_iterator it2 = info_content.begin(); it2 != info_content.end(); ++it2)
++	    {
++		if (!rx_filelist.match(*it2))
++		    continue;
++
++		SFile fl(info_dir, *it2);
++		fl.restorecon(selabel_handle);
++	    }
++	}
++#endif
++    }
++
++
+     static bool
+     is_subpath(const string& a, const string& b)
+     {
+@@ -721,7 +805,12 @@ namespace snapper
+ #ifndef ENABLE_BTRFS_QUOTA
+ 	    "no-"
+ #endif
+-	    "btrfs-quota"
++	    "btrfs-quota,"
++
++#ifndef ENABLE_SELINUX
++	    "no-"
++#endif
++	    "selinux"
+ 
+ 	    ;
+     }
+diff --git a/snapper/Snapper.h b/snapper/Snapper.h
+index e942b31..d0213a9 100644
+--- a/snapper/Snapper.h
++++ b/snapper/Snapper.h
+@@ -38,6 +38,7 @@ namespace snapper
+ 
+     class Filesystem;
+     class SDir;
++    class SelinuxLabelHandle;
+ 
+ 
+     class ConfigInfo : public SysconfigFile
+@@ -167,6 +168,10 @@ namespace snapper
+ 
+ 	void syncAcl(const vector<uid_t>& uids, const vector<gid_t>& gids) const;
+ 
++	void syncSelinuxContexts(bool skip_snapshot_dir) const;
++	void syncSelinuxContextsInInfosDir(bool skip_snapshot_dir) const;
++	void syncInfoDir(SDir& dir) const;
++
+ 	ConfigInfo* config_info;
+ 
+ 	Filesystem* filesystem;
+@@ -175,6 +180,8 @@ namespace snapper
+ 
+ 	Snapshots snapshots;
+ 
++	SelinuxLabelHandle* selabel_handle;
++
+     };
+ 
+ }
+-- 
+2.7.4
+

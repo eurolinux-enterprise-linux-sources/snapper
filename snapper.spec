@@ -1,13 +1,14 @@
 Name:		snapper
-Version:	0.1.7
-Release:	7%{?dist}
+Version:	0.2.8
+Release:	4%{?dist}
 License:	GPLv2
 Group:		Applications/System
 BuildRequires:	boost-devel gettext libtool libxml2-devel dbus-devel
-BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.16.1
-BuildRequires:	libselinux-devel libacl-devel
+BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.16.2
+BuildRequires:	libacl-devel libselinux-devel >= 2.5-4
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 Requires:	diffutils%{?_isa}
+Requires:	crontabs
 Summary:	Tool for filesystem snapshot management
 Url:		http://en.opensuse.org/Portal:Snapper
 
@@ -15,14 +16,14 @@ Source0:	https://github.com/openSUSE/snapper/archive/v%{version}.tar.gz#/%{name}
 patch0:		%{name}-remove-ext4-info-xml.patch
 patch1:		%{name}-rename-cron-files.patch
 patch2:		%{name}-securelibdir.patch
-patch3:		%{name}-0.1.8-adapt-to-libbtrfs-change.patch
-patch4:		%{name}-0.2.1-btrfs-fix-internal-cmp.patch
-patch5:		%{name}-manpages-remove-invalid-references.patch
-patch6:		%{name}-0.2.2-add-norecovery-option-xfs.patch
-patch7:		%{name}-0.2.2-fix-acl-revert-xfs.patch
-patch8:		%{name}-add-selinux-restorecon-support.patch
-patch9:		%{name}-0.2.2-fixed-empty-pre-post-cleanup-algorithm.patch
-patch10:	%{name}-0.2.4-add-conditionals-for-btrfs-library-versions.patch
+patch3:		%{name}-manpages-remove-invalid-references.patch
+patch4:		%{name}-0.3.0-rule-out-race-while-u-mounting-lvm-snapshot.patch
+patch5:		%{name}-move-refcounters.patch
+patch6:		%{name}-get-files-by-pipe.patch
+patch7:		%{name}-workaround-linkage-issue-on-some-archs.patch
+patch8:		%{name}-selinux-support.patch
+patch9:		%{name}-0.3.4-fix-objects-termination-clashes-on-shutdown.patch
+patch10:	%{name}-0.3.4-replace-getmntent-with-getmntent_r.patch
 
 %description
 This package contains snapper, a tool for filesystem snapshot management.
@@ -77,7 +78,7 @@ automake --add-missing --copy
 autoconf
 # NOTE: --disable-ext4 option removes support for ext4 internal snapshots since the feature
 # never made it into upstream kernel
-%configure --disable-silent-rules --disable-ext4 --docdir=%{_defaultdocdir}/%{name}-%{version} --disable-zypp --enable-selinux
+%configure --disable-silent-rules --disable-ext4 --docdir=%{_defaultdocdir}/%{name}-%{version} --disable-zypp --disable-rollback --enable-selinux
 #NOTE: avoid 'unused-direct-shlib-dependency' warning in rpmlint checks
 sed -i -e 's! -shared ! -Wl,--as-needed\0!g' libtool
 make %{?_smp_mflags}
@@ -99,12 +100,17 @@ rm -f %{buildroot}/%{_libdir}/security/*.la
 %config(noreplace) %{_sysconfdir}/logrotate.d/snapper
 %{_sysconfdir}/cron.hourly/snapper
 %{_sysconfdir}/cron.daily/snapper
+%{_unitdir}/%{name}-*.timer
+%{_unitdir}/%{name}-*.service
 %config(noreplace) %{_sysconfdir}/dbus-1/system.d/org.opensuse.Snapper.conf
 %{_datadir}/dbus-1/system-services/org.opensuse.Snapper.service
 %doc AUTHORS
 %{_mandir}/man8/%{name}.8*
 %{_mandir}/man8/snapperd.8*
 %{_mandir}/man5/snapper-configs.5*
+%dir %{_prefix}/lib/%{name}
+%{_prefix}/lib/%{name}/systemd-helper
+%{_prefix}/lib/%{name}/installation-helper
 
 %files libs
 %{_libdir}/libsnapper.so.*
@@ -131,6 +137,36 @@ rm -f %{buildroot}/%{_libdir}/security/*.la
 %doc %{_mandir}/*/pam_snapper*.*
 
 %changelog
+* Tue Aug 16 2016 Ondrej Kozina <okozina@redhat.com> - 0.2.8-4
+- patch: replace getmntent with thread safe variant
+- Resolves: #1262370
+
+* Wed Aug 10 2016 Ondrej Kozina <okozina@redhat.com> - 0.2.8-3
+- patch: fix snapperd abort on shutdown when started in debug mode
+- Resolves: #1357010
+
+* Mon Jul 04 2016 Ondrej Kozina <okozina@redhat.com> - 0.2.8-2
+- patch: selinux support (sync contexts on snapper metadata)
+- Resolves: #1069312
+
+* Tue Jun 21 2016 Ondrej Kozina <okozina@redhat.com> - 0.2.8-1
+- Update to snapper 0.2.8
+- patch: rule out race while mounting lvm snapshot
+- Resolves: #1250371 #1262370
+
+* Wed Aug 05 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-10
+- patch: use pipe instead of socket pair for transfering large data
+- Resolves: #1229353
+
+* Thu Jul 30 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-9
+- patch: fix snapperd abort while passing large data over dbus
+- patch: workaround linkage issue on s390 and ppc64le
+- Resolves: #1229353
+
+* Tue Jul 07 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-8
+- patch: fix segmentation fault with dbus
+- Resolves: #1231684
+
 * Mon Sep 29 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-7
 - patch: fix empty-pre-post cleanup algorithm
 - patch: add conditionals for btrfs library versions

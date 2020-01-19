@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -20,26 +20,36 @@
  */
 
 
-#ifndef SNAPPER_FACTORY_H
-#define SNAPPER_FACTORY_H
+#ifndef SNAPPER_HOOKS_H
+#define SNAPPER_HOOKS_H
 
 
-#include <string>
+#include "snapper/Snapper.h"
+#include "snapper/Filesystem.h"
 
 
 namespace snapper
 {
-    using std::string;
+    using namespace std;
 
 
-    class Snapper;
+    class Hooks
+    {
+    public:
 
+	static void create_config(const string& subvolume, const Filesystem* filesystem);
+	static void delete_config(const string& subvolume, const Filesystem* filesystem);
 
-    // Using the factory functions only one Snapper can exist at a time.
+	static void create_snapshot(const string& subvolume, const Filesystem* filesystem);
+	static void modify_snapshot(const string& subvolume, const Filesystem* filesystem);
+	static void delete_snapshot(const string& subvolume, const Filesystem* filesystem);
 
-    Snapper* createSnapper(const string& config_name = "root", bool disable_filters = false);
+    private:
 
-    void deleteSnapper(Snapper*);
+	static void grub(const string& subvolume, const Filesystem* filesystem,
+			 const char* option);
+
+    };
 
 }
 

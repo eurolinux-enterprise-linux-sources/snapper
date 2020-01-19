@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2014] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -41,6 +41,8 @@
 
 namespace snapper
 {
+    using namespace std;
+
 
     Comparison::Comparison(const Snapper* snapper, Snapshots::const_iterator snapshot1,
 			   Snapshots::const_iterator snapshot2)
@@ -64,7 +66,25 @@ namespace snapper
     void
     Comparison::initialize()
     {
-	if (getSnapshot1()->isCurrent() || getSnapshot2()->isCurrent())
+	// When booting a snapshot the current snapshot could be read-only.
+	// But which snapshot is booted as current snapshot might not be constant.
+
+	bool fixed = !getSnapshot1()->isCurrent() && !getSnapshot2()->isCurrent();
+
+	if (fixed)
+	{
+	    try
+	    {
+		fixed = getSnapshot1()->isReadOnly() && getSnapshot2()->isReadOnly();
+	    }
+	    catch (const runtime_error& e)
+	    {
+		y2err("failed to query read-only status, " << e.what());
+		fixed = false;
+	    }
+	}
+
+	if (!fixed)
 	{
 	    create();
 	}
@@ -79,17 +99,6 @@ namespace snapper
 
 	filter();
     }
-
-
-    struct Comparison::AppendHelper
-    {
-	AppendHelper(const FilePaths* file_paths, Files& files)
-	    : file_paths(file_paths), files(files) {}
-	void operator()(const string& name, unsigned int status)
-	    { files.push_back(File(file_paths, name, status)); }
-	const FilePaths* file_paths;
-	Files& files;
-    };
 
 
     void
@@ -117,13 +126,9 @@ namespace snapper
     {
 	y2mil("num1:" << getSnapshot1()->getNum() << " num2:" << getSnapshot2()->getNum());
 
-#if 1
-	cmpdirs_cb_t cb = AppendHelper(&file_paths, files);
-#else
-	cmpdirs_cb_t cb = [&file_paths, &files](const string& name, unsigned int status) {
+	cmpdirs_cb_t cb = [this](const string& name, unsigned int status) {
 	    files.push_back(File(&file_paths, name, status));
 	};
-#endif
 
 	mount();
 

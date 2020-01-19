@@ -2,23 +2,18 @@
 # Makefile.am for snapper/testsuite
 #
 
-CXXFLAGS += -std=gnu++0x
+AM_CPPFLAGS = -I$(top_srcdir) $(DBUS_CFLAGS)
 
-INCLUDES = -I$(top_srcdir)
+LDADD = ../snapper/libsnapper.la ../dbus/libdbus.la -lboost_unit_test_framework
 
-LDADD = ../snapper/libsnapper.la
+check_PROGRAMS = sysconfig-get1.test dirname1.test basename1.test		\
+	equal-date.test dbus-escape.test cmp-lt.test
 
-noinst_SCRIPTS = run-all
+TESTS = $(check_PROGRAMS)
 
-noinst_PROGRAMS = sysconfig-get1 dirname1 basename1
-
-sysconfig_get1_SOURCES = sysconfig-get1.cc common.h
-
-dirname1_SOURCES = dirname1.cc common.h
-basename1_SOURCES = basename1.cc common.h
+AM_DEFAULT_SOURCE_EXT = .cc
 
 EXTRA_DIST = $(noinst_SCRIPTS) sysconfig-get1.txt
 
-check:
-	./run-all
+equal_date_test_LDADD = -lboost_unit_test_framework ../client/utils/libutils.la
 

@@ -49,14 +49,6 @@ namespace snapper
 }
 
 
-    SystemCmd::SystemCmd(bool log_output)
-	: Combine_b(false), log_output(log_output)
-{
-    y2mil("constructor SystemCmd");
-    init();
-}
-
-
 void SystemCmd::init()
     {
     File_aC[0] = File_aC[1] = NULL;
@@ -415,43 +407,6 @@ SystemCmd::getLine( unsigned Nr_iv, bool Sel_bv, OutputStream Idx_iv ) const
 	    }
 	}
     return ret;
-    }
-
-
-int
-SystemCmd::select( const string& Pat_Cv, OutputStream Idx_iv )
-    {
-    if( Idx_iv > 1 )
-	{
-	y2err("invalid index " << Idx_iv);
-	}
-    string Search_Ci( Pat_Cv );
-    bool BeginOfLine_bi = Search_Ci.length()>0 && Search_Ci[0]=='^';
-    if( BeginOfLine_bi )
-	{
-	Search_Ci.erase( 0, 1 );
-	}
-    SelLines_aC[Idx_iv].resize(0);
-    int Size_ii = 0;
-    int End_ii = Lines_aC[Idx_iv].size();
-    for( int I_ii=0; I_ii<End_ii; I_ii++ )
-	{
-	string::size_type Pos_ii = Lines_aC[Idx_iv][I_ii].find( Search_Ci );
-	if( Pos_ii>0 && BeginOfLine_bi )
-	    {
-	    Pos_ii = string::npos;
-	    }
-	if (Pos_ii != string::npos)
-	    {
-	    SelLines_aC[Idx_iv].resize( Size_ii+1 );
-	    SelLines_aC[Idx_iv][Size_ii] = &Lines_aC[Idx_iv][I_ii];
-	    y2deb("Select Added Line " << Size_ii << " \"" << *SelLines_aC[Idx_iv][Size_ii] << "\"");
-	    Size_ii++;
-	    }
-	}
-
-    y2mil("Pid:" << Pid_i << " Idx:" << Idx_iv << " Pattern:\"" << Pat_Cv << "\" Lines:" << Size_ii);
-    return Size_ii;
     }
 
 

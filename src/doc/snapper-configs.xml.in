@@ -2,7 +2,7 @@
 <refentry id='snapper-configs5'>
 
   <refentryinfo>
-    <date>2013-07-09</date>
+    <date>2014-05-20</date>
   </refentryinfo>
 
   <refmeta>
@@ -57,6 +57,8 @@
 	  <para>List of users allowed to operate with the config. The user-names
 	  must be separated by spaces. Spaces in usernames can be escaped with a
 	  &quot;\&quot;.</para>
+	  <para>Also see the PERMISSONS section in
+	  <citerefentry><refentrytitle>snapper</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
 	  <para>Default value is &quot;&quot; but &quot;root&quot; is always
 	  implicitly included.</para>
 	</listitem>
@@ -68,7 +70,22 @@
 	  <para>List of groups allowed to operate with the config. The group-names
 	  must be separated by spaces. Spaces in group-names can be escaped with a
 	  &quot;\&quot;.</para>
+	  <para>Also see the PERMISSONS section in
+	  <citerefentry><refentrytitle>snapper</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
 	  <para>Default value is &quot;&quot;.</para>
+	</listitem>
+      </varlistentry>
+
+      <varlistentry>
+	<term><option>SYNC_ACL=<replaceable>boolean</replaceable></option></term>
+	<listitem>
+	  <para>Defines whether snapper will sync the users and groups from
+	  ALLOW_USERS and ALLOW_GROUPS to the ACL of the <filename>.snapshots</filename>
+	  directory.</para>
+	  <para>Also see the PERMISSONS section in
+	  <citerefentry><refentrytitle>snapper</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+	  <para>Default value is &quot;no&quot;.</para>
+	  <para>New in version 0.2.0.</para>
 	</listitem>
       </varlistentry>
 
@@ -77,7 +94,7 @@
 	<listitem>
 	  <para>Defines whether pre and post snapshots should be compared in
 	  the background after creation.</para>
-	  <para>Default value is &quot;no&quot;.</para>
+	  <para>Default value is &quot;yes&quot;.</para>
 	</listitem>
       </varlistentry>
 
@@ -105,6 +122,19 @@
 	  <para>Defines how many snapshots the number cleanup algorithm should
 	  keep. The youngest snapshots will be kept.</para>
 	  <para>Default value is &quot;50&quot;.</para>
+	</listitem>
+      </varlistentry>
+
+      <varlistentry>
+	<term><option>NUMBER_LIMIT_IMPORTANT=<replaceable>number</replaceable></option></term>
+	<listitem>
+	  <para>Defines how many important snapshots the number cleanup
+	  algorithm should keep. Important snapshots have important=yes in the
+	  userdata. The youngest important snapshots will be kept.</para>
+	  <para>The number of normal and important snapshots are counted
+	  independently.</para>
+	  <para>Default value is &quot;10&quot;.</para>
+	  <para>New in version 0.1.8.</para>
 	</listitem>
       </varlistentry>
 
@@ -141,7 +171,7 @@
 	<term><option>TIMELINE_LIMIT_HOURLY=<replaceable>number</replaceable></option></term>
 	<listitem>
 	  <para>Defines how many hourly snapshots the timeline cleanup
-	  algorithm should keep. An hourly snapshots is the first snapshot in an
+	  algorithm should keep. An hourly snapshot is the first snapshot in an
 	  hour. The youngest hourly snapshots will be kept.</para>
 	  <para>Default value is &quot;10&quot;.</para>
 	</listitem>
@@ -151,18 +181,29 @@
 	<term><option>TIMELINE_LIMIT_DAILY=<replaceable>number</replaceable></option></term>
 	<listitem>
 	  <para>Defines how many daily snapshots the timeline cleanup
-	  algorithm should keep. A daily snapshots is the first snapshot in a day. The
+	  algorithm should keep. A daily snapshot is the first snapshot in a day. The
 	  youngest daily snapshots will be kept.</para>
 	  <para>Default value is &quot;10&quot;.</para>
 	</listitem>
       </varlistentry>
 
       <varlistentry>
+	<term><option>TIMELINE_LIMIT_WEEKLY=<replaceable>number</replaceable></option></term>
+	<listitem>
+	  <para>Defines how many weekly snapshots the timeline cleanup
+	  algorithm should keep. A weekly snapshot is the first snapshot in a week. The
+	  youngest weekly snapshots will be kept. In compliance with ISO 8601
+	  weeks start on Monday.</para>
+	  <para>Default value is &quot;0&quot;.</para>
+	</listitem>
+      </varlistentry>
+
+      <varlistentry>
 	<term><option>TIMELINE_LIMIT_MONTHLY=<replaceable>number</replaceable></option></term>
 	<listitem>
-	  <para>Defines how many daily snapshots the timeline cleanup
-	  algorithm should keep. A daily snapshots is the first snapshot in a day. The
-	  youngest daily snapshots will be kept.</para>
+	  <para>Defines how many monthly snapshots the timeline cleanup
+	  algorithm should keep. A monthly snapshot is the first snapshot in a month. The
+	  youngest monthly snapshots will be kept.</para>
 	  <para>Default value is &quot;10&quot;.</para>
 	</listitem>
       </varlistentry>
@@ -170,9 +211,9 @@
       <varlistentry>
 	<term><option>TIMELINE_LIMIT_YEARLY=<replaceable>number</replaceable></option></term>
 	<listitem>
-	  <para>Defines how many daily snapshots the timeline cleanup
-	  algorithm should keep. A daily snapshots is the first snapshot in a day. The
-	  youngest daily snapshots will be kept.</para>
+	  <para>Defines how many yearly snapshots the timeline cleanup
+	  algorithm should keep. A yearly snapshot is the first snapshot in a year. The
+	  youngest yearly snapshots will be kept.</para>
 	  <para>Default value is &quot;10&quot;.</para>
 	</listitem>
       </varlistentry>
@@ -196,6 +237,13 @@
       </varlistentry>
 
     </variablelist>
+  </refsect1>
+
+  <refsect1 id='notes'>
+    <title>NOTES</title>
+    <para>The default values stated here are the values snapper uses when the
+    entry is missing in the configuration file. Some are not identical to the
+    values from the configuration file template.</para>
   </refsect1>
 
   <refsect1 id='homepage'>

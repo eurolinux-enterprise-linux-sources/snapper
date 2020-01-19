@@ -1,0 +1,327 @@
+From af7a2d5614235465a52cb379bdcb364c955ce6ff Mon Sep 17 00:00:00 2001
+From: Ondrej Kozina <okozina@redhat.com>
+Date: Wed, 29 Jul 2015 13:39:29 +0200
+Subject: [PATCH 1/2] - move reference counters code
+
+---
+ server/Makefile.am    |  3 +-
+ server/MetaSnapper.cc | 59 -------------------------------------
+ server/MetaSnapper.h  | 44 +---------------------------
+ server/RefCounter.cc  | 80 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ server/RefCounter.h   | 70 ++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 153 insertions(+), 103 deletions(-)
+ create mode 100644 server/RefCounter.cc
+ create mode 100644 server/RefCounter.h
+
+diff --git a/server/Makefile.am b/server/Makefile.am
+index 0334426..c268349 100644
+--- a/server/Makefile.am
++++ b/server/Makefile.am
+@@ -11,7 +11,8 @@ snapperd_SOURCES =					\
+ 	Client.cc		Client.h		\
+ 	MetaSnapper.cc		MetaSnapper.h		\
+ 	Background.cc		Background.h		\
+-	Types.cc		Types.h
++	Types.cc		Types.h			\
++	RefCounter.cc		RefCounter.h
+ 
+ snapperd_LDADD = ../snapper/libsnapper.la ../dbus/libdbus.la -lrt
+ 
+diff --git a/server/MetaSnapper.cc b/server/MetaSnapper.cc
+index 7ee1b4b..4566b6f 100644
+--- a/server/MetaSnapper.cc
++++ b/server/MetaSnapper.cc
+@@ -34,65 +34,6 @@
+ MetaSnappers meta_snappers;
+ 
+ 
+-RefCounter::RefCounter()
+-    : counter(0), last_used(steady_clock::now())
+-{
+-}
+-
+-
+-int
+-RefCounter::inc_use_count()
+-{
+-    boost::lock_guard<boost::mutex> lock(mutex);
+-
+-    return ++counter;
+-}
+-
+-
+-int
+-RefCounter::dec_use_count()
+-{
+-    boost::lock_guard<boost::mutex> lock(mutex);
+-
+-    assert(counter > 0);
+-
+-    if (--counter == 0)
+-	last_used = steady_clock::now();
+-
+-    return counter;
+-}
+-
+-
+-void
+-RefCounter::update_use_time()
+-{
+-    boost::lock_guard<boost::mutex> lock(mutex);
+-
+-    last_used = steady_clock::now();
+-}
+-
+-
+-int
+-RefCounter::use_count() const
+-{
+-    boost::lock_guard<boost::mutex> lock(mutex);
+-
+-    return counter;
+-}
+-
+-
+-milliseconds
+-RefCounter::unused_for() const
+-{
+-    boost::lock_guard<boost::mutex> lock(mutex);
+-
+-    if (counter != 0)
+-	return milliseconds(0);
+-
+-    return duration_cast<milliseconds>(steady_clock::now() - last_used);
+-}
+-
+-
+ MetaSnapper::MetaSnapper(ConfigInfo& config_info)
+     : config_info(config_info), snapper(NULL)
+ {
+diff --git a/server/MetaSnapper.h b/server/MetaSnapper.h
+index eec6697..53d68d6 100644
+--- a/server/MetaSnapper.h
++++ b/server/MetaSnapper.h
+@@ -24,57 +24,15 @@
+ #define SNAPPER_META_SNAPPER_H
+ 
+ 
+-#include <chrono>
+-#include <boost/thread.hpp>
++#include "RefCounter.h"
+ 
+ #include <snapper/Snapper.h>
+ 
+ 
+ using namespace std;
+-using namespace std::chrono;
+ using namespace snapper;
+ 
+ 
+-class RefCounter : private boost::noncopyable
+-{
+-public:
+-
+-    RefCounter();
+-
+-    int inc_use_count();
+-    int dec_use_count();
+-    void update_use_time();
+-
+-    int use_count() const;
+-    milliseconds unused_for() const;
+-
+-private:
+-
+-    mutable boost::mutex mutex;
+-
+-    int counter;
+-
+-    steady_clock::time_point last_used;
+-
+-};
+-
+-
+-class RefHolder
+-{
+-public:
+-
+-    RefHolder(RefCounter& ref) : ref(ref)
+-	{ ref.inc_use_count(); }
+-    ~RefHolder()
+-	{ ref.dec_use_count(); }
+-
+-private:
+-
+-    RefCounter& ref;
+-
+-};
+-
+-
+ struct UnknownConfig : public std::exception
+ {
+     explicit UnknownConfig() throw() {}
+diff --git a/server/RefCounter.cc b/server/RefCounter.cc
+new file mode 100644
+index 0000000..dc0867e
+--- /dev/null
++++ b/server/RefCounter.cc
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (c) [2012-2015] Novell, Inc.
++ *
++ * All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of version 2 of the GNU General Public License as published
++ * by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, contact Novell, Inc.
++ *
++ * To contact Novell about this file by physical or electronic mail, you may
++ * find current contact information at www.novell.com.
++ */
++
++#include "RefCounter.h"
++
++RefCounter::RefCounter()
++    : counter(0), last_used(steady_clock::now())
++{
++}
++
++
++int
++RefCounter::inc_use_count()
++{
++    boost::lock_guard<boost::mutex> lock(mutex);
++
++    return ++counter;
++}
++
++
++int
++RefCounter::dec_use_count()
++{
++    boost::lock_guard<boost::mutex> lock(mutex);
++
++    assert(counter > 0);
++
++    if (--counter == 0)
++	last_used = steady_clock::now();
++
++    return counter;
++}
++
++
++void
++RefCounter::update_use_time()
++{
++    boost::lock_guard<boost::mutex> lock(mutex);
++
++    last_used = steady_clock::now();
++}
++
++
++int
++RefCounter::use_count() const
++{
++    boost::lock_guard<boost::mutex> lock(mutex);
++
++    return counter;
++}
++
++
++milliseconds
++RefCounter::unused_for() const
++{
++    boost::lock_guard<boost::mutex> lock(mutex);
++
++    if (counter != 0)
++	return milliseconds(0);
++
++    return duration_cast<milliseconds>(steady_clock::now() - last_used);
++}
+diff --git a/server/RefCounter.h b/server/RefCounter.h
+new file mode 100644
+index 0000000..25ee25d
+--- /dev/null
++++ b/server/RefCounter.h
+@@ -0,0 +1,70 @@
++/*
++ * Copyright (c) [2012-2015] Novell, Inc.
++ *
++ * All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of version 2 of the GNU General Public License as published
++ * by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, contact Novell, Inc.
++ *
++ * To contact Novell about this file by physical or electronic mail, you may
++ * find current contact information at www.novell.com.
++ */
++
++#ifndef SNAPPER_REF_COUNTER_H
++#define SNAPPER_REF_COUNTER_H
++
++#include <chrono>
++#include <boost/thread.hpp>
++
++using namespace std::chrono;
++
++class RefCounter : private boost::noncopyable
++{
++public:
++
++    RefCounter();
++
++    int inc_use_count();
++    int dec_use_count();
++    void update_use_time();
++
++    int use_count() const;
++    milliseconds unused_for() const;
++
++private:
++
++    mutable boost::mutex mutex;
++
++    int counter;
++
++    steady_clock::time_point last_used;
++
++};
++
++
++class RefHolder
++{
++public:
++
++    RefHolder(RefCounter& ref) : ref(ref)
++	{ ref.inc_use_count(); }
++    ~RefHolder()
++	{ ref.dec_use_count(); }
++
++private:
++
++    RefCounter& ref;
++
++};
++
++#endif
++
+-- 
+2.5.5
+

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2012] Novell, Inc.
+ * Copyright (c) [2011-2014] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -23,6 +23,8 @@
 #include <algorithm>
 
 #include <snapper/SnapperTmpl.h>
+
+#include "utils/equal-date.h"
 
 #include "commands.h"
 
@@ -84,10 +86,19 @@ filter2(const XSnapshots& snapshots, list<XSnapshots::const_iterator>& tmp)
 
 
 bool
-do_cleanup_number(DBus::Connection& conn, const string& config_name)
+is_important(XSnapshots::const_iterator it1)
+{
+    map<string, string>::const_iterator it2 = it1->getUserdata().find("important");
+    return it2 != it1->getUserdata().end() && it2->second == "yes";
+}
+
+
+bool
+do_cleanup_number(DBus::Connection& conn, const string& config_name, bool verbose)
 {
     time_t min_age = 1800;
     size_t limit = 50;
+    size_t limit_important = 10;
 
     XConfigInfo ci = command_get_xconfig(conn, config_name);
     map<string, string>::const_iterator pos;
@@ -95,6 +106,11 @@ do_cleanup_number(DBus::Connection& conn, const string& config_name)
 	pos->second >> min_age;
     if ((pos = ci.raw.find("NUMBER_LIMIT")) != ci.raw.end())
 	pos->second >> limit;
+    if ((pos = ci.raw.find("NUMBER_LIMIT_IMPORTANT")) != ci.raw.end())
+	pos->second >> limit_important;
+
+    size_t num = 0;
+    size_t num_important = 0;
 
     XSnapshots snapshots = command_list_xsnapshots(conn, config_name);
 
@@ -103,24 +119,41 @@ do_cleanup_number(DBus::Connection& conn, const string& config_name)
     for (XSnapshots::const_iterator it = snapshots.begin(); it != snapshots.end(); ++it)
     {
 	if (it->getCleanup() == "number")
-	    tmp.push_back(it);
+	    tmp.push_front(it);
     }
 
-    if (tmp.size() > limit)
+    list<XSnapshots::const_iterator>::iterator it = tmp.begin();
+    while (it != tmp.end())
     {
-	list<XSnapshots::const_iterator>::iterator it = tmp.end();
-	advance(it, - limit);
-	tmp.erase(it, tmp.end());
+	bool keep = false;
 
-	filter1(tmp, min_age);
-	filter2(snapshots, tmp);
-
-	for (list<XSnapshots::const_iterator>::const_iterator it = tmp.begin(); it != tmp.end(); ++it)
+	if (num_important < limit_important && is_important(*it))
 	{
-	    list<unsigned int> nums;
-	    nums.push_back((*it)->getNum());
-	    command_delete_xsnapshots(conn, config_name, nums);
+	    ++num_important;
+	    keep = true;
 	}
+	if (num < limit)
+	{
+	    ++num;
+	    keep = true;
+	}
+
+	if (keep)
+	    it = tmp.erase(it);
+	else
+	    ++it;
+    }
+
+    tmp.reverse();
+
+    filter1(tmp, min_age);
+    filter2(snapshots, tmp);
+
+    for (list<XSnapshots::const_iterator>::const_iterator it = tmp.begin(); it != tmp.end(); ++it)
+    {
+	list<unsigned int> nums;
+	nums.push_back((*it)->getNum());
+	command_delete_xsnapshots(conn, config_name, nums, verbose);
     }
 
     return true;
@@ -158,31 +191,6 @@ is_first(list<XSnapshots::const_iterator>::const_iterator first,
 
 
 bool
-equal_year(const struct tm& tmp1, const struct tm& tmp2)
-{
-    return tmp1.tm_year == tmp2.tm_year;
-}
-
-bool
-equal_month(const struct tm& tmp1, const struct tm& tmp2)
-{
-    return equal_year(tmp1, tmp2) && tmp1.tm_mon == tmp2.tm_mon;
-}
-
-bool
-equal_day(const struct tm& tmp1, const struct tm& tmp2)
-{
-    return equal_month(tmp1, tmp2) && tmp1.tm_mday == tmp2.tm_mday;
-}
-
-bool
-equal_hour(const struct tm& tmp1, const struct tm& tmp2)
-{
-    return equal_day(tmp1, tmp2) && tmp1.tm_hour == tmp2.tm_hour;
-}
-
-
-bool
 is_first_yearly(list<XSnapshots::const_iterator>::const_iterator first,
 		list<XSnapshots::const_iterator>::const_iterator last,
 		XSnapshots::const_iterator it1)
@@ -196,6 +204,14 @@ is_first_monthly(list<XSnapshots::const_iterator>::const_iterator first,
 		 XSnapshots::const_iterator it1)
 {
     return is_first(first, last, it1, equal_month);
+}
+
+bool
+is_first_weekly(list<XSnapshots::const_iterator>::const_iterator first,
+		list<XSnapshots::const_iterator>::const_iterator last,
+		XSnapshots::const_iterator it1)
+{
+    return is_first(first, last, it1, equal_week);
 }
 
 bool
@@ -216,12 +232,13 @@ is_first_hourly(list<XSnapshots::const_iterator>::const_iterator first,
 
 
 bool
-do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
+do_cleanup_timeline(DBus::Connection& conn, const string& config_name, bool verbose)
 {
     time_t min_age = 1800;
     size_t limit_hourly = 10;
     size_t limit_daily = 10;
     size_t limit_monthly = 10;
+    size_t limit_weekly = 0;
     size_t limit_yearly = 10;
 
     XConfigInfo ci = command_get_xconfig(conn, config_name);
@@ -232,6 +249,8 @@ do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
 	pos->second >> limit_hourly;
     if ((pos = ci.raw.find("TIMELINE_LIMIT_DAILY")) != ci.raw.end())
 	pos->second >> limit_daily;
+    if ((pos = ci.raw.find("TIMELINE_LIMIT_WEEKLY")) != ci.raw.end())
+	pos->second >> limit_weekly;
     if ((pos = ci.raw.find("TIMELINE_LIMIT_MONTHLY")) != ci.raw.end())
 	pos->second >> limit_monthly;
     if ((pos = ci.raw.find("TIMELINE_LIMIT_YEARLY")) != ci.raw.end())
@@ -239,6 +258,7 @@ do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
 
     size_t num_hourly = 0;
     size_t num_daily = 0;
+    size_t num_weekly = 0;
     size_t num_monthly = 0;
     size_t num_yearly = 0;
 
@@ -267,6 +287,11 @@ do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
 	    ++num_daily;
 	    keep = true;
 	}
+	if (num_weekly < limit_weekly && is_first_weekly(it, tmp.end(), *it))
+	{
+	    ++num_weekly;
+	    keep = true;
+	}
 	if (num_monthly < limit_monthly && is_first_monthly(it, tmp.end(), *it))
 	{
 	    ++num_monthly;
@@ -279,13 +304,9 @@ do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
 	}
 
 	if (keep)
-	{
 	    it = tmp.erase(it);
-	}
 	else
-	{
 	    ++it;
-	}
     }
 
     tmp.reverse();
@@ -297,7 +318,7 @@ do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
     {
 	list<unsigned int> nums;
 	nums.push_back((*it)->getNum());
-	command_delete_xsnapshots(conn, config_name, nums);
+	command_delete_xsnapshots(conn, config_name, nums, verbose);
     }
 
     return true;
@@ -305,7 +326,7 @@ do_cleanup_timeline(DBus::Connection& conn, const string& config_name)
 
 
 bool
-do_cleanup_empty_pre_post(DBus::Connection& conn, const string& config_name)
+do_cleanup_empty_pre_post(DBus::Connection& conn, const string& config_name, bool verbose)
 {
     time_t min_age = 1800;
 
@@ -335,6 +356,8 @@ do_cleanup_empty_pre_post(DBus::Connection& conn, const string& config_name)
 		    tmp.push_back(it1);
 		    tmp.push_back(it2);
 		}
+
+		command_delete_xcomparison(conn, config_name, it1->getNum(), it2->getNum());
 	    }
 	}
     }
@@ -346,7 +369,7 @@ do_cleanup_empty_pre_post(DBus::Connection& conn, const string& config_name)
     {
 	list<unsigned int> nums;
 	nums.push_back((*it)->getNum());
-	command_delete_xsnapshots(conn, config_name, nums);
+	command_delete_xsnapshots(conn, config_name, nums, verbose);
     }
 
     return true;

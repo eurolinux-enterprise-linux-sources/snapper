@@ -34,7 +34,7 @@ setup()
 
     initDefaultLogger();
 
-    sh = new Snapper(CONFIG);
+    sh = new Snapper(CONFIG, "/");
 }
 
 
@@ -48,16 +48,22 @@ cleanup()
 void
 first_snapshot()
 {
-    first = sh->createPreSnapshot(CONFIG);
-    first->setCleanup("number");
+    SCD scd;
+    scd.description = CONFIG;
+    scd.cleanup = "number";
+
+    first = sh->createPreSnapshot(scd);
 }
 
 
 void
 second_snapshot()
 {
-    second = sh->createPostSnapshot(CONFIG, first);
-    second->setCleanup("number");
+    SCD scd;
+    scd.description = CONFIG;
+    scd.cleanup = "number";
+
+    second = sh->createPostSnapshot(first, scd);
 }
 
 

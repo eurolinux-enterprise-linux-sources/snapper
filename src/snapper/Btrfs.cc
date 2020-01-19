@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2011-2013] Novell, Inc.
+ * Copyright (c) [2011-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -30,7 +30,15 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <asm/types.h>
+#ifdef ENABLE_ROLLBACK
+#include <libmount/libmount.h>
+#endif
 #ifdef HAVE_LIBBTRFS
+#ifdef HAVE_BTRFS_VERSION_H
+#include <btrfs/version.h>
+#else
+#define BTRFS_LIB_VERSION (100)
+#endif
 #include <btrfs/ioctl.h>
 #include <btrfs/send.h>
 #include <btrfs/send-stream.h>
@@ -47,24 +55,46 @@
 #include "snapper/Snapper.h"
 #include "snapper/SnapperTmpl.h"
 #include "snapper/SnapperDefines.h"
+#include "snapper/Acls.h"
 
 
 namespace snapper
 {
+    using namespace std;
+
 
     Filesystem*
-    Btrfs::create(const string& fstype, const string& subvolume)
+    Btrfs::create(const string& fstype, const string& subvolume, const string& root_prefix)
     {
 	if (fstype == "btrfs")
-	    return new Btrfs(subvolume);
+	    return new Btrfs(subvolume, root_prefix);
 
 	return NULL;
     }
 
 
-    Btrfs::Btrfs(const string& subvolume)
-	: Filesystem(subvolume)
+    Btrfs::Btrfs(const string& subvolume, const string& root_prefix)
+	: Filesystem(subvolume, root_prefix), qgroup(no_qgroup)
     {
+    }
+
+
+    void
+    Btrfs::evalConfigInfo(const ConfigInfo& config_info)
+    {
+	string qgroup_str;
+	if (config_info.getValue("QGROUP", qgroup_str) && !qgroup_str.empty())
+	{
+	    try
+	    {
+		qgroup = make_qgroup(qgroup_str);
+	    }
+	    catch (const runtime_error& e)
+	    {
+		y2err("failed to parse qgroup '" << qgroup_str << "'");
+		throw InvalidConfigException();
+	    }
+	}
     }
 
 
@@ -73,9 +103,13 @@ namespace snapper
     {
 	SDir subvolume_dir = openSubvolumeDir();
 
-	if (!create_subvolume(subvolume_dir.fd(), ".snapshots"))
+	try
 	{
-	    y2err("create subvolume failed errno:" << errno << " (" << stringerror(errno) << ")");
+	    create_subvolume(subvolume_dir.fd(), ".snapshots");
+	}
+	catch (const runtime_error& e)
+	{
+	    y2err("create subvolume failed, " << e.what());
 	    throw CreateConfigFailedException("creating btrfs snapshot failed");
 	}
 
@@ -91,11 +125,62 @@ namespace snapper
     {
 	SDir subvolume_dir = openSubvolumeDir();
 
-	if (!delete_subvolume(subvolume_dir.fd(), ".snapshots"))
+#ifdef ENABLE_ROLLBACK
+	if (subvolume == "/")
 	{
-	    y2err("delete subvolume failed errno:" << errno << " (" << stringerror(errno) << ")");
+	    subvolume_dir.umount(".snapshots");
+
+	    removeFromFstab();
+	}
+#endif
+
+	try
+	{
+	    delete_subvolume(subvolume_dir.fd(), ".snapshots");
+	}
+	catch (const runtime_error& e)
+	{
+	    y2err("delete subvolume failed, " << e.what());
 	    throw DeleteConfigFailedException("deleting btrfs snapshot failed");
 	}
+    }
+
+
+    void
+    Btrfs::addToFstab(const string& default_subvolume_name) const
+    {
+#ifdef ENABLE_ROLLBACK
+	if (subvolume == "/")
+	{
+	    try
+	    {
+		addToFstabHelper(default_subvolume_name);
+	    }
+	    catch (const runtime_error& e)
+	    {
+		y2err("adding to fstab failed, " << e.what());
+	    }
+	}
+#endif
+    }
+
+
+    void
+    Btrfs::removeFromFstab() const
+    {
+#ifdef ENABLE_ROLLBACK
+	if (subvolume == "/")
+	{
+	    try
+	    {
+		removeFromFstabHelper();
+	    }
+	    catch (const runtime_error& e)
+	    {
+		y2err("removing from fstab failed, " << e.what());
+	    }
+	}
+#endif
     }
 
 
@@ -179,17 +264,85 @@ namespace snapper
 
 
     void
-    Btrfs::createSnapshot(unsigned int num) const
+    Btrfs::createSnapshot(unsigned int num, unsigned int num_parent, bool read_only) const
+    {
+	if (num_parent == 0)
+	{
+	    SDir subvolume_dir = openSubvolumeDir();
+	    SDir info_dir = openInfoDir(num);
+
+	    try
+	    {
+		create_snapshot(subvolume_dir.fd(), info_dir.fd(), "snapshot", read_only, qgroup);
+	    }
+	    catch (const runtime_error& e)
+	    {
+		y2err("create snapshot failed, " << e.what());
+		throw CreateSnapshotFailedException();
+	    }
+	}
+	else
+	{
+	    SDir snapshot_dir = openSnapshotDir(num_parent);
+	    SDir info_dir = openInfoDir(num);
+
+	    try
+	    {
+		create_snapshot(snapshot_dir.fd(), info_dir.fd(), "snapshot", read_only, qgroup);
+	    }
+	    catch (const runtime_error& e)
+	    {
+		y2err("create snapshot failed, " << e.what());
+		throw CreateSnapshotFailedException();
+	    }
+	}
+    }
+
+
+#ifdef ENABLE_ROLLBACK
+
+    void
+    Btrfs::createSnapshotOfDefault(unsigned int num, bool read_only) const
     {
 	SDir subvolume_dir = openSubvolumeDir();
+	subvolid_t id = get_default_id(subvolume_dir.fd());
+	string name = get_subvolume(subvolume_dir.fd(), id);
+
+	bool found = false;
+	MtabData mtab_data;
+	if (!getMtabData(subvolume, found, mtab_data))
+	{
+	    y2err("failed to find device");
+	    throw CreateSnapshotFailedException();
+	}
+
+	SDir infos_dir = openInfosDir();
+	TmpMount tmp_mount(infos_dir, mtab_data.device, "tmp-mnt-XXXXXX", "btrfs", 0,
+			   "subvol=" + name);
+
+	SDir tmp_mount_dir(infos_dir, tmp_mount.getName());
 	SDir info_dir = openInfoDir(num);
 
-	if (!create_snapshot(subvolume_dir.fd(), info_dir.fd(), "snapshot"))
+	try
 	{
-	    y2err("create snapshot failed errno:" << errno << " (" << stringerror(errno) << ")");
+	    create_snapshot(tmp_mount_dir.fd(), info_dir.fd(), "snapshot", read_only, qgroup);
+	}
+	catch (const runtime_error& e)
+	{
+	    y2err("create snapshot failed, " << e.what());
 	    throw CreateSnapshotFailedException();
 	}
     }
+
+#else
+
+    void
+    Btrfs::createSnapshotOfDefault(unsigned int num, bool read_only) const
+    {
+	throw std::logic_error("not implemented");
+    }
+
+#endif
 
 
     void
@@ -197,9 +350,17 @@ namespace snapper
     {
 	SDir info_dir = openInfoDir(num);
 
-	if (!delete_subvolume(info_dir.fd(), "snapshot"))
+	try
 	{
-	    y2err("delete snapshot failed errno:" << errno << " (" << stringerror(errno) << ")");
+	    subvolid_t subvolid = get_id(openSnapshotDir(num).fd());
+
+	    delete_subvolume(info_dir.fd(), "snapshot");
+
+	    deleted_subvolids.push_back(subvolid);
+	}
+	catch (const runtime_error& e)
+	{
+	    y2err("delete snapshot failed, " << e.what());
 	    throw DeleteSnapshotFailedException();
 	}
     }
@@ -225,6 +386,14 @@ namespace snapper
 
 
     bool
+    Btrfs::isSnapshotReadOnly(unsigned int num) const
+    {
+	SDir snapshot_dir = openSnapshotDir(num);
+	return is_subvolume_read_only(snapshot_dir.fd());
+    }
+
+
+    bool
     Btrfs::checkSnapshot(unsigned int num) const
     {
 	try
@@ -237,6 +406,8 @@ namespace snapper
 	}
 	catch (const IOErrorException& e)
 	{
+	    // TODO the openInfoDir above logs an error although when this
+	    // function is used from nextNumber the failure is ok
 	    return false;
 	}
     }
@@ -450,10 +621,10 @@ namespace snapper
 	if (status & CREATED) status = CREATED;
 	if (status & DELETED) status = DELETED;
 
-	if (status & (CONTENT | PERMISSIONS | USER | GROUP | XATTRS))
+	if (status & (CONTENT | PERMISSIONS | OWNER | GROUP | XATTRS | ACL))
 	{
 	    // TODO check for content sometimes not required
-	    status &= ~(CONTENT | PERMISSIONS | USER | GROUP | XATTRS);
+	    status &= ~(CONTENT | PERMISSIONS | OWNER | GROUP | XATTRS | ACL);
 
 	    string dirname = snapper::dirname(name);
 	    string basename = snapper::basename(name);
@@ -546,7 +717,7 @@ namespace snapper
 	else
 	{
 	    node->status &= ~(CREATED | DELETED);
-	    node->status |= CONTENT | PERMISSIONS | USER | GROUP | XATTRS;
+	    node->status |= CONTENT | PERMISSIONS | OWNER | GROUP | XATTRS | ACL;
 	}
     }
 
@@ -679,7 +850,7 @@ namespace snapper
 		else
 		{
 		    node->status &= ~(CREATED | DELETED);
-		    node->status |= CONTENT | PERMISSIONS | USER | GROUP | XATTRS;
+		    node->status |= CONTENT | PERMISSIONS | OWNER | GROUP | XATTRS | ACL;
 		}
 
 		merge(processor, &it->second, from, to, x);
@@ -697,7 +868,7 @@ namespace snapper
 		else
 		{
 		    node->status &= ~(CREATED | DELETED);
-		    node->status |= CONTENT | PERMISSIONS | USER | GROUP | XATTRS;
+		    node->status |= CONTENT | PERMISSIONS | OWNER | GROUP | XATTRS | ACL;
 		}
 
 		merge(processor, &it->second, from, to, x);
@@ -854,6 +1025,14 @@ namespace snapper
 
 	tree_node* node = processor->files.insert(path);
 	node->status |= XATTRS;
+
+	if (is_acl_signature(name))
+	{
+	    #ifdef DEBUG_PROCESS
+		y2deb("adding acl flag, signature:'" << name << "'");
+	    #endif
+	    node->status |= ACL;
+	}
 #endif
 
 	return 0;
@@ -872,6 +1051,14 @@ namespace snapper
 
 	tree_node* node = processor->files.insert(path);
 	node->status |= XATTRS;
+
+	if (is_acl_signature(name))
+	{
+	    #ifdef DEBUG_PROCESS
+		y2deb("adding acl flag, signature:'" << name << "'");
+	    #endif
+	    node->status |= ACL;
+	}
 #endif
 
 	return 0;
@@ -920,7 +1107,7 @@ namespace snapper
 #endif
 
 	tree_node* node = processor->files.insert(path);
-	node->status |= USER | GROUP;
+	node->status |= OWNER | GROUP;
 
 	return 0;
     }
@@ -982,7 +1169,14 @@ namespace snapper
 	{
 	    boost::this_thread::interruption_point();
 
-	    int r = btrfs_read_and_process_send_stream(fd, &send_ops, &*this);
+	     // remove the fourth parameter for older versions of libbtrfs
+	    int r;
+
+#if BTRFS_LIB_VERSION < 101
+	    r = btrfs_read_and_process_send_stream(fd, &send_ops, &*this, 0);
+#else
+	    r = btrfs_read_and_process_send_stream(fd, &send_ops, &*this, 0, 1);
+#endif
 
 	    if (r < 0)
 	    {
@@ -1102,7 +1296,7 @@ namespace snapper
 
 	u64 parent_root_id = 0;
 	string name1 = string(dir1.fullname(), base.fullname().size() + 1);
-	if (get_root_id(name1, &parent_root_id) < 0)
+	if (!get_root_id(name1, &parent_root_id))
 	{
 	    y2err("could not resolve root_id for " << name1);
 	    throw BtrfsSendReceiveException();
@@ -1127,7 +1321,9 @@ namespace snapper
 	{
 	    StopWatch stopwatch;
 
-	    StreamProcessor processor(openSubvolumeDir(), dir1, dir2);
+	    const SDir subvolume(openSubvolumeDir());
+
+	    StreamProcessor processor(subvolume, dir1, dir2);
 
 	    processor.process(cb);
 
@@ -1156,4 +1352,179 @@ namespace snapper
 #endif
 
 
+
+#ifdef ENABLE_ROLLBACK
+
+    void
+    Btrfs::setDefault(unsigned int num) const
+    {
+	try
+	{
+	    if (num == 0)
+	    {
+		SDir subvolume_dir = openSubvolumeDir();
+		subvolid_t id = get_id(subvolume_dir.fd());
+		set_default_id(subvolume_dir.fd(), id);
+	    }
+	    else
+	    {
+		SDir snapshot_dir = openSnapshotDir(num);
+		subvolid_t id = get_id(snapshot_dir.fd());
+
+		SDir subvolume_dir = openSubvolumeDir();
+		set_default_id(subvolume_dir.fd(), id);
+	    }
+	}
+	catch (const runtime_error& e)
+	{
+	    y2err("set default failed, " << e.what());
+	    throw IOErrorException();
+	}
+    }
+
+#else
+
+    void
+    Btrfs::setDefault(unsigned int num) const
+    {
+	throw std::logic_error("not implemented");
+    }
+
+#endif
+
+
+    void
+    Btrfs::sync() const
+    {
+	SDir subvolume_dir = openSubvolumeDir();
+
+	BtrfsUtils::sync(subvolume_dir.fd());
+
+	if (!deleted_subvolids.empty())
+	{
+	    for (subvolid_t subvolid : deleted_subvolids)
+	    {
+		while (!does_subvolume_exist(subvolume_dir.fd(), subvolid))
+		    sleep(1);
+	    }
+
+	    deleted_subvolids.clear();
+
+	    BtrfsUtils::sync(subvolume_dir.fd());
+	}
+    }
+
+
+#ifdef ENABLE_ROLLBACK
+
+    class MntTable
+    {
+
+    public:
+
+	MntTable(const string& root_prefix)
+	    : root_prefix(root_prefix), table(mnt_new_table())
+	{
+	    if (!table)
+		throw runtime_error("mnt_new_table failed");
+
+	    mnt_table_enable_comments(table, 1);
+	}
+
+	~MntTable()
+	{
+	    mnt_reset_table(table);
+	}
+
+	void parse_fstab()
+	{
+	    if (mnt_table_parse_fstab(table, target_fstab().c_str()) != 0)
+		throw runtime_error("mnt_table_parse_fstab failed");
+	}
+
+	void replace_file()
+	{
+	    if (mnt_table_replace_file(table, target_fstab().c_str()) != 0)
+		throw runtime_error("mnt_table_replace_file failed");
+	}
+
+	struct libmnt_fs* find_target(const string& path, int directon)
+	{
+	    return mnt_table_find_target(table, path.c_str(), directon);
+	}
+
+	void add_fs(struct libmnt_fs* fs)
+	{
+	    if (mnt_table_add_fs(table, fs) != 0)
+		throw runtime_error("mnt_table_add_fs failed");
+	}
+
+	void remove_fs(struct libmnt_fs* fs)
+	{
+	    if (mnt_table_remove_fs(table, fs) != 0)
+		throw runtime_error("mnt_table_remove_fs failed");
+	}
+
+    private:
+
+	string target_fstab() const
+	{
+	    return prepend_root_prefix(root_prefix, "/etc/fstab");
+	}
+
+	const string root_prefix;
+
+	struct libmnt_table* table;
+
+    };
+
+
+    void
+    Btrfs::addToFstabHelper(const string& default_subvolume_name) const
+    {
+	string subvol_option = default_subvolume_name;
+	if (!subvol_option.empty())
+	    subvol_option += "/";
+	subvol_option += ".snapshots";
+
+	MntTable mnt_table(root_prefix);
+	mnt_table.parse_fstab();
+
+	libmnt_fs* root = mnt_table.find_target(subvolume, MNT_ITER_FORWARD);
+	if (!root)
+	    throw runtime_error("root entry not found");
+
+	libmnt_fs* snapshots = mnt_copy_fs(NULL, root);
+	if (!snapshots)
+	    throw runtime_error("mnt_copy_fs failed");
+
+	mnt_fs_set_target(snapshots, "/.snapshots");
+
+	char* options = mnt_fs_strdup_options(snapshots);
+	mnt_optstr_remove_option(&options, "defaults");
+	mnt_optstr_set_option(&options, "subvol", subvol_option.c_str());
+	mnt_fs_set_options(snapshots, options);
+	free(options);
+
+	mnt_table.add_fs(snapshots);
+	mnt_table.replace_file();
+    }
+
+
+    void
+    Btrfs::removeFromFstabHelper() const
+    {
+	MntTable mnt_table(root_prefix);
+	mnt_table.parse_fstab();
+
+	string mountpoint = (subvolume == "/" ? "" : subvolume) +  "/.snapshots";
+	libmnt_fs* snapshots = mnt_table.find_target(mountpoint, MNT_ITER_FORWARD);
+	if (!snapshots)
+	    return;
+
+	mnt_table.remove_fs(snapshots);
+	mnt_table.replace_file();
+    }
+
+#endif
 }

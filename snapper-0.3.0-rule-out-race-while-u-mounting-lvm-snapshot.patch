@@ -1,0 +1,56 @@
+From 0b43d4f8c76d4ee4a05090b3d1db70d61e1c461c Mon Sep 17 00:00:00 2001
+From: Ondrej Kozina <okozina@redhat.com>
+Date: Tue, 15 Mar 2016 17:04:03 +0100
+Subject: [PATCH] rule out race while (u)mounting lvm snapshot
+
+---
+ snapper/Lvm.cc | 4 ++++
+ snapper/Lvm.h  | 3 +++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/snapper/Lvm.cc b/snapper/Lvm.cc
+index 766dee4..0fb9036 100644
+--- a/snapper/Lvm.cc
++++ b/snapper/Lvm.cc
+@@ -251,6 +251,8 @@ namespace snapper
+     void
+     Lvm::mountSnapshot(unsigned int num) const
+     {
++	boost::unique_lock<boost::mutex> lock(mount_mutex);
++
+ 	if (isSnapshotMounted(num))
+ 	    return;
+ 
+@@ -273,6 +275,8 @@ namespace snapper
+     void
+     Lvm::umountSnapshot(unsigned int num) const
+     {
++	boost::unique_lock<boost::mutex> lock(mount_mutex);
++
+ 	if (isSnapshotMounted(num))
+ 	{
+ 	    SDir info_dir = openInfoDir(num);
+diff --git a/snapper/Lvm.h b/snapper/Lvm.h
+index 87193ad..be86731 100644
+--- a/snapper/Lvm.h
++++ b/snapper/Lvm.h
+@@ -24,6 +24,7 @@
+ #define SNAPPER_LVM_H
+ 
+ #include <boost/noncopyable.hpp>
++#include <boost/thread/mutex.hpp>
+ 
+ #include "snapper/Filesystem.h"
+ 
+@@ -108,6 +109,8 @@ namespace snapper
+ 
+     private:
+ 
++	mutable boost::mutex mount_mutex;
++
+ 	const string mount_type;
+ 	const LvmCapabilities* caps;
+ 	LvmCache* cache;
+-- 
+2.5.5
+

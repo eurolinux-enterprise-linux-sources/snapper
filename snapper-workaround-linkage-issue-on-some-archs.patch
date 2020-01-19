@@ -1,0 +1,29 @@
+diff -rupN snapper-0.2.8.old/client/Makefile.am snapper-0.2.8/client/Makefile.am
+--- snapper-0.2.8.old/client/Makefile.am	2016-06-22 05:25:06.614691299 -0400
++++ snapper-0.2.8/client/Makefile.am	2016-06-22 05:37:04.852044323 -0400
+@@ -16,7 +16,7 @@ snapper_SOURCES =			\
+ 	misc.cc		misc.h		\
+ 	errors.cc	errors.h
+ 
+-snapper_LDADD = ../snapper/libsnapper.la utils/libutils.la ../dbus/libdbus.la ../pipe/libpipe.la -lboost_serialization
++snapper_LDADD = ../snapper/libsnapper.la utils/libutils.la ../dbus/libdbus.la ../pipe/libpipe.la -lboost_serialization -lpthread
+ 
+ libexecdir = /usr/lib/snapper
+ 
+@@ -36,5 +36,5 @@ systemd_helper_SOURCES =		\
+ 	misc.cc		misc.h		\
+ 	errors.cc	errors.h
+ 
+-systemd_helper_LDADD = ../snapper/libsnapper.la utils/libutils.la ../dbus/libdbus.la ../pipe/libpipe.la -lboost_serialization
++systemd_helper_LDADD = ../snapper/libsnapper.la utils/libutils.la ../dbus/libdbus.la ../pipe/libpipe.la -lboost_serialization -lpthread
+ 
+diff -rupN snapper-0.2.8.old/server/Makefile.am snapper-0.2.8/server/Makefile.am
+--- snapper-0.2.8.old/server/Makefile.am	2016-06-22 05:25:06.854693816 -0400
++++ snapper-0.2.8/server/Makefile.am	2016-06-22 05:27:38.996262627 -0400
+@@ -16,5 +16,5 @@ snapperd_SOURCES =					\
+ 	FilesTransferTask.cc	FilesTransferTask.h	\
+ 	FileSerialization.h
+ 
+-snapperd_LDADD = ../snapper/libsnapper.la ../dbus/libdbus.la ../pipe/libpipe.la -lrt -lboost_serialization
++snapperd_LDADD = ../snapper/libsnapper.la ../dbus/libdbus.la ../pipe/libpipe.la -lrt -lboost_serialization -lpthread
+ 

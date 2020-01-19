@@ -2,11 +2,11 @@
 # Makefile.am for snapper/examples/c++-lib
 #
 
-INCLUDES = -I$(top_srcdir)
+AM_CPPFLAGS = -I$(top_srcdir)
 
 LDADD = ../../snapper/libsnapper.la
 
-noinst_PROGRAMS = List ListAll Create CmpDirs CreateTimeline SnapTest
+noinst_PROGRAMS = List ListAll Create CmpDirs CreateNumber CreateTimeline
 
 List_SOURCES = List.cc
 
@@ -16,7 +16,7 @@ Create_SOURCES = Create.cc
 
 CmpDirs_SOURCES = CmpDirs.cc
 
-CreateTimeline_SOURCES = CreateTimeline.cc
+CreateNumber_SOURCES = CreateNumber.cc
 
-SnapTest_SOURCES = SnapTest.cc
+CreateTimeline_SOURCES = CreateTimeline.cc
 

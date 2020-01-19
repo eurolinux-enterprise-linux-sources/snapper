@@ -1,5 +1,5 @@
 /*
- * Copyright (c) [2004-2012] Novell, Inc.
+ * Copyright (c) [2004-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -25,12 +25,16 @@
 
 #include <sys/time.h>
 #include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
 #include <sstream>
 #include <locale>
 #include <string>
 #include <list>
 #include <map>
 #include <vector>
+#include <stdexcept>
+#include <chrono>
 
 
 namespace snapper
@@ -48,10 +52,12 @@ namespace snapper
     bool clonefile(int src_fd, int dest_fd);
     bool copyfile(int src_fd, int dest_fd);
 
-    int readlink(const string& path, string& buf);
+    ssize_t readlink(const string& path, string& buf);
     int symlink(const string& oldpath, const string& newpath);
 
     string realpath(const string& path);
+
+    string prepend_root_prefix(const string& root_prefix, const string& path);
 
     string stringerror(int errnum);
 
@@ -82,7 +88,10 @@ namespace snapper
     string datetime(time_t time, bool utc, bool classic);
     time_t scan_datetime(const string& str, bool utc);
 
-    string username(uid_t uid);
+    bool get_uid_username_gid(uid_t uid, string& username, gid_t& gid);
+    bool get_user_uid(const char* username, uid_t& uid);
+    bool get_group_gid(const char* groupname, gid_t& gid);
+    vector<gid_t> getgrouplist(const char* username, gid_t gid);
 
 
     class StopWatch
@@ -97,12 +106,21 @@ namespace snapper
 
     protected:
 
-	struct timeval start_tv;
+	std::chrono::steady_clock::time_point start_time;
 
     };
 
 
     string sformat(const string& format, ...);
+
+
+    struct runtime_error_with_errno : public std::runtime_error
+    {
+	explicit runtime_error_with_errno(const char* what_arg, int errnum)
+	    : runtime_error(sformat("%s, errno:%d (%s)", what_arg, errnum,
+				    stringerror(errnum).c_str()))
+	{}
+    };
 
 }
 

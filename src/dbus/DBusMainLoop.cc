@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Novell, Inc.
+ * Copyright (c) [2012-2015] Novell, Inc.
  *
  * All Rights Reserved.
  *
@@ -22,13 +22,34 @@
 
 #include <unistd.h>
 #include <poll.h>
-#include <time.h>
 
 #include "DBusMainLoop.h"
 
 
 namespace DBus
 {
+
+    MainLoop::Watch::Watch(DBusWatch* dbus_watch)
+	: dbus_watch(dbus_watch), enabled(false), fd(-1), events(0)
+    {
+	enabled = dbus_watch_get_enabled(dbus_watch);
+	fd = dbus_watch_get_unix_fd(dbus_watch);
+
+	unsigned int flags = dbus_watch_get_flags(dbus_watch);
+	if (flags & DBUS_WATCH_READABLE)
+	    events |= POLLIN;
+	if (flags & DBUS_WATCH_WRITABLE)
+	    events |= POLLOUT;
+    }
+
+
+    MainLoop::Timeout::Timeout(DBusTimeout* dbus_timeout)
+	: dbus_timeout(dbus_timeout), enabled(false), interval(0)
+    {
+	enabled = dbus_timeout_get_enabled(dbus_timeout);
+	interval = dbus_timeout_get_interval(dbus_timeout);
+    }
+
 
     MainLoop::MainLoop(DBusBusType type)
 	: Connection(type), idle_timeout(-1)
@@ -84,52 +105,52 @@ namespace DBus
 		}
 	    }
 
-	    int timeout = periodic_timeout();
+	    milliseconds timeout = periodic_timeout();
 
-	    if (idle_timeout >= 0)
+	    if (idle_timeout.count() >= 0)
 	    {
-		int time_left = last_action - monotonic_clock() + idle_timeout;
-
-		if (timeout > time_left * 1000 || timeout == -1)
-		    timeout = time_left * 1000;
+		steady_clock::duration time_left = idle_for() + idle_timeout;
+		if (timeout > time_left || timeout.count() < 0)
+		    timeout = duration_cast<milliseconds>(time_left);
 	    }
 
-	    int r = poll(&pollfds[0], pollfds.size(), timeout);
+	    int r = poll(&pollfds[0], pollfds.size(), timeout.count());
 	    if (r == -1)
 		throw FatalException();
 
 	    periodic();
 
-	    for (vector<struct pollfd>::const_iterator it2 = pollfds.begin(); it2 != pollfds.end(); ++it2)
+	    for (vector<struct pollfd>::const_iterator it1 = pollfds.begin(); it1 != pollfds.end(); ++it1)
 	    {
-		if (it2->fd == wakeup_pipe[0] && (it2->revents & POLLIN))
+		if (it1->fd == wakeup_pipe[0])
 		{
-		    char arbitrary;
-		    read(wakeup_pipe[0], &arbitrary, 1);
-		}
-	    }
-
-	    for (vector<Watch>::const_iterator it = watches.begin(); it != watches.end(); ++it)
-	    {
-		if (it->enabled)
-		{
-		    for (vector<struct pollfd>::const_iterator it2 = pollfds.begin(); it2 != pollfds.end(); ++it2)
+		    if (it1->revents & POLLIN)
 		    {
-			if (it2->fd == it->fd)
+			char arbitrary;
+			read(wakeup_pipe[0], &arbitrary, 1);
+		    }
+		}
+		else
+		{
+		    unsigned int flags = 0;
+
+		    if (it1->revents & POLLIN)
+			flags |= DBUS_WATCH_READABLE;
+
+		    if (it1->revents & POLLOUT)
+			flags |= DBUS_WATCH_WRITABLE;
+
+		    if (flags != 0)
+		    {
+			// Do not iterate over watches here since calling dbus_watch_handle() can
+			// trigger a remove_watch() callback, thus invalidating the iterator.
+			// Instead always search for the watch.
+
+			vector<Watch>::const_iterator it2 = find_enabled_watch(it1->fd, it1->events);
+			if (it2 != watches.end())
 			{
-			    unsigned int flags = 0;
-
-			    if (it2->revents & POLLIN)
-				flags |= DBUS_WATCH_READABLE;
-
-			    if (it2->revents & POLLOUT)
-				flags |= DBUS_WATCH_WRITABLE;
-
-			    if (flags != 0)
-			    {
-				boost::lock_guard<boost::mutex> lock(mutex);
-				dbus_watch_handle(it->dbus_watch, flags);
-			    }
+			    boost::lock_guard<boost::mutex> lock(mutex);
+			    dbus_watch_handle(it2->dbus_watch, flags);
 			}
 		    }
 		}
@@ -142,11 +163,10 @@ namespace DBus
 		dispatch_incoming(msg);
 	    }
 
-	    if (idle_timeout >= 0)
+	    if (idle_timeout.count() >= 0)
 	    {
-		int time_left = last_action - monotonic_clock() + idle_timeout;
-
-		if (time_left <= 0)
+		steady_clock::duration time_left = idle_for() + idle_timeout;
+		if (time_left.count() <= 0)
 		    break;
 	    }
 	}
@@ -154,16 +174,23 @@ namespace DBus
 
 
     void
-    MainLoop::set_idle_timeout(int s)
+    MainLoop::set_idle_timeout(milliseconds idle_timeout)
     {
-	idle_timeout = s;
+	MainLoop::idle_timeout = idle_timeout;
     }
 
 
     void
     MainLoop::reset_idle_count()
     {
-	last_action = monotonic_clock();
+	last_action = steady_clock::now();
+    }
+
+
+    milliseconds
+    MainLoop::idle_for() const
+    {
+	return duration_cast<milliseconds>(last_action - steady_clock::now());
     }
 
 
@@ -175,6 +202,17 @@ namespace DBus
 		return it;
 
 	throw FatalException();
+    }
+
+
+    vector<MainLoop::Watch>::iterator
+    MainLoop::find_enabled_watch(int fd, short events)
+    {
+	for (vector<Watch>::iterator it = watches.begin(); it != watches.end(); ++it)
+	    if (it->enabled && it->fd == fd && it->events == events)
+		return it;
+
+	return watches.end();
     }
 
 
@@ -192,22 +230,9 @@ namespace DBus
     dbus_bool_t
     MainLoop::add_watch(DBusWatch* dbus_watch, void* data)
     {
-	Watch tmp;
-	tmp.enabled = dbus_watch_get_enabled(dbus_watch);
-	tmp.fd = dbus_watch_get_unix_fd(dbus_watch);
-	tmp.flags = dbus_watch_get_flags(dbus_watch);
-
-	tmp.events = 0;
-	if (tmp.flags & DBUS_WATCH_READABLE)
-	    tmp.events |= POLLIN;
-	if (tmp.flags & DBUS_WATCH_WRITABLE)
-	    tmp.events |= POLLOUT;
-
-	tmp.dbus_watch = dbus_watch;
-
+	Watch tmp(dbus_watch);
 	MainLoop* s = static_cast<MainLoop*>(data);
 	s->watches.push_back(tmp);
-
 	return true;
     }
 
@@ -233,14 +258,9 @@ namespace DBus
     dbus_bool_t
     MainLoop::add_timeout(DBusTimeout* dbus_timeout, void* data)
     {
-	Timeout tmp;
-	tmp.enabled = dbus_timeout_get_enabled(dbus_timeout);
-	tmp.interval = dbus_timeout_get_interval(dbus_timeout);
-	tmp.dbus_timeout = dbus_timeout;
-
+	Timeout tmp(dbus_timeout);
 	MainLoop* s = static_cast<MainLoop*>(data);
 	s->timeouts.push_back(tmp);
-
 	return true;
     }
 
@@ -249,7 +269,6 @@ namespace DBus
     MainLoop::remove_timeout(DBusTimeout* dbus_timeout, void* data)
     {
 	MainLoop* s = static_cast<MainLoop*>(data);
-
 	vector<Timeout>::iterator it = s->find_timeout(dbus_timeout);
 	s->timeouts.erase(it);
     }
@@ -324,15 +343,6 @@ namespace DBus
 	    }
 	    break;
 	}
-    }
-
-
-    time_t
-    DBus::MainLoop::monotonic_clock()
-    {
-	struct timespec tmp;
-	clock_gettime(CLOCK_MONOTONIC, &tmp);
-	return tmp.tv_sec;
     }
 
 }

@@ -1,0 +1,321 @@
+-------------------------------------------------------------------
+Tue Oct 01 15:46:19 CEST 2013 - aschnell@suse.de
+
+- restrict permissions on .snapshots subvolume (bnc#843219)
+- 0.1.7
+
+-------------------------------------------------------------------
+Mon Sep 30 14:20:22 CEST 2013 - aschnell@suse.de
+
+- merged support for handling inactive LVM LVs from oniko
+
+-------------------------------------------------------------------
+Fri Sep 06 16:02:47 CEST 2013 - aschnell@suse.de
+
+- added option --no-dbus to snapper tool
+- 0.1.6
+
+-------------------------------------------------------------------
+Thu Jul 25 14:40:31 CEST 2013 - aschnell@suse.de
+
+- allow to change config via DBus and with command line tool
+
+-------------------------------------------------------------------
+Tue Jul 09 14:00:16 CEST 2013 - aschnell@suse.de
+
+- added manpage describing snapper configs
+- optimize timeline cleanup algorithm for only sporadic running
+  systems
+- 0.1.5
+
+-------------------------------------------------------------------
+Mon Jul 08 16:18:10 CEST 2013 - aschnell@suse.de
+
+- document filters and use fnmatch with FNM_LEADING_DIR
+
+-------------------------------------------------------------------
+Tue Jun 25 09:09:20 CEST 2013 - aschnell@suse.de
+
+- also call initgroups in pam_snapper (bnc#815383)
+
+-------------------------------------------------------------------
+Fri Jun 21 15:50:22 CEST 2013 - aschnell@suse.de
+
+- allow whitespace in ALLOW_USERS and ALLOW_GROUPS
+
+-------------------------------------------------------------------
+Fri May 31 17:35:33 CEST 2013 - aschnell@suse.de
+
+- fixed xattrs reading for certain block/character devices
+
+-------------------------------------------------------------------
+Thu May 02 15:11:17 CEST 2013 - aschnell@suse.de
+
+- added PAM module from mge
+- version 0.1.4
+
+-------------------------------------------------------------------
+Tue Apr 16 16:52:29 CEST 2013 - aschnell@suse.de
+
+- merged xattr support from oniko
+- version 0.1.3
+
+-------------------------------------------------------------------
+Thu Feb 28 18:39:19 CET 2013 - aschnell@suse.de
+
+- added filters for lvm
+
+-------------------------------------------------------------------
+Mon Feb 25 10:54:32 CET 2013 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Fri Feb 22 11:49:23 CET 2013 - aschnell@suse.de
+
+- use sendfile system-call instead of read/write loop
+
+-------------------------------------------------------------------
+Thu Feb 21 14:23:55 CET 2013 - aschnell@suse.de
+
+- removed obsolete calls to renice and ionice in cron scripts
+  (bnc#804355)
+
+-------------------------------------------------------------------
+Thu Feb 07 18:13:26 CET 2013 - aschnell@suse.de
+
+- zypp-plugin requires dbus-1-python
+
+-------------------------------------------------------------------
+Wed Feb 06 10:27:57 CET 2013 - aschnell@suse.de
+
+- fixed compatibility issue with boost 1.52
+
+-------------------------------------------------------------------
+Mon Feb 04 14:00:45 CET 2013 - aschnell@suse.de
+
+- use btrfs send ioctl for snapshot comparison (fate #311399)
+- version 0.1.2
+
+-------------------------------------------------------------------
+Thu Jan 24 14:32:02 CET 2013 - aschnell@suse.de
+
+- fixed type of time_t in DBus protocol
+
+-------------------------------------------------------------------
+Mon Nov 26 12:40:54 CET 2012 - aschnell@suse.de
+
+- implemented use-counter for mounts of snapshots
+- updated translations
+
+-------------------------------------------------------------------
+Wed Nov 21 11:55:28 CET 2012 - aschnell@suse.de
+
+- handle userdata in zypp plugin (fate #312521)
+
+-------------------------------------------------------------------
+Mon Nov 12 15:37:25 CET 2012 - aschnell@suse.de
+
+- reject create-config on non-thin LVM volumes
+- version 0.1.1
+
+-------------------------------------------------------------------
+Thu Oct 18 15:11:49 CEST 2012 - aschnell@suse.de
+
+- .snapshots is not required to have group root if it is not
+  group-writable
+
+-------------------------------------------------------------------
+Mon Oct 15 10:40:07 CEST 2012 - aschnell@suse.de
+
+- merged dbus branch (fate #313010 and fate #313042)
+  - allows non-root user to use snapper
+  - record user id during snapshot creation
+  - run background comparisons sequential
+  - use ioctl instead of btrfs program
+  - disable ext4 support
+  - removed Python bindings
+- version 0.1.0
+
+-------------------------------------------------------------------
+Wed Aug 22 18:43:47 CEST 2012 - aschnell@suse.de
+
+- fixed segmentation fault for unknown fstype
+- version 0.0.14
+
+-------------------------------------------------------------------
+Tue Aug 14 12:03:50 CEST 2012 - aschnell@suse.de
+
+- fixed logging during program termination
+
+-------------------------------------------------------------------
+Wed Jul 25 10:44:38 CEST 2012 - aschnell@suse.de
+
+- take mount options from original filesystem when mounting
+  snapshots
+- version 0.0.13
+
+-------------------------------------------------------------------
+Tue Jul 24 14:35:44 CEST 2012 - aschnell@suse.de
+
+- added experimental support for LVM thin-provisioned snapshots
+- version 0.0.12
+
+-------------------------------------------------------------------
+Tue Jun 12 10:07:08 CEST 2012 - aschnell@suse.de
+
+- removed blocxx (fate #313242)
+- version 0.0.11
+
+-------------------------------------------------------------------
+Thu Mar 15 10:56:40 CET 2012 - aschnell@suse.de
+
+- added missing includes for gcc 4.7
+
+-------------------------------------------------------------------
+Tue Mar 06 11:37:34 CET 2012 - aschnell@suse.de
+
+- allow to disable background comparison (bnc#726122)
+- version 0.0.10
+
+-------------------------------------------------------------------
+Fri Mar 02 16:25:26 CET 2012 - aschnell@suse.de
+
+- added option --command to snapper create
+- version 0.0.9
+
+-------------------------------------------------------------------
+Fri Feb 24 19:21:15 CET 2012 - aschnell@suse.de
+
+- allow to compile without blocxx
+
+-------------------------------------------------------------------
+Fri Dec 23 15:33:12 CET 2011 - aschnell@suse.de
+
+- allow to delete a configuration
+
+-------------------------------------------------------------------
+Thu Nov 24 14:09:15 CET 2011 - aschnell@suse.de
+
+- package Python bindings
+- version 0.0.8
+
+-------------------------------------------------------------------
+Sat Nov 19 20:46:08 UTC 2011 - coolo@suse.com
+
+- add libtool as buildrequire to avoid implicit dependency
+
+-------------------------------------------------------------------
+Fri Nov 11 11:20:03 CET 2011 - aschnell@suse.de
+
+- moved supplements btrfsprogs from libsnapper to snapper
+  (bnc#729859)
+
+-------------------------------------------------------------------
+Fri Oct 21 11:34:27 CEST 2011 - aschnell@suse.de
+
+- create read-only btrfs snapshots
+
+-------------------------------------------------------------------
+Wed Oct 12 15:12:41 CEST 2011 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Fri Oct 07 15:42:40 CEST 2011 - aschnell@suse.de
+
+- check iterator in findPre
+
+-------------------------------------------------------------------
+Thu Sep 22 16:28:53 CEST 2011 - aschnell@suse.de
+
+- do not log output of diff command
+
+-------------------------------------------------------------------
+Tue Sep 20 11:05:47 CEST 2011 - aschnell@suse.de
+
+- improved error handling (bnc#718914)
+
+-------------------------------------------------------------------
+Thu Sep 15 16:44:26 CEST 2011 - aschnell@suse.de
+
+- added userdata to snapshots
+
+-------------------------------------------------------------------
+Fri Sep 02 10:27:46 CEST 2011 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Wed Aug 31 15:44:42 CEST 2011 - aschnell@suse.de
+
+- renamed snapper command diff to status and contentdiff to diff
+
+-------------------------------------------------------------------
+Mon Aug 29 16:17:11 CEST 2011 - aschnell@suse.de
+
+- improved manpage (bnc #710858)
+
+-------------------------------------------------------------------
+Thu Aug 11 12:09:19 CEST 2011 - aschnell@suse.de
+
+- improvements to command-line interface
+
+-------------------------------------------------------------------
+Thu Aug 04 20:51:59 CEST 2011 - aschnell@suse.de
+
+- added experimental ext4 support
+
+-------------------------------------------------------------------
+Mon Aug 01 14:42:16 CEST 2011 - aschnell@suse.de
+
+- preparations for supporting multiple filesystem types
+- version 0.0.7
+
+-------------------------------------------------------------------
+Mon Aug 01 12:34:40 CEST 2011 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Sat Jul 30 16:15:42 CEST 2011 - aschnell@suse.de
+
+- added missing shell quoting
+
+-------------------------------------------------------------------
+Tue Jun 28 11:46:28 CEST 2011 - aschnell@suse.de
+
+- added snapper-zypp-plugin subpackage (fate #308626)
+
+-------------------------------------------------------------------
+Fri Jun 17 11:02:48 CEST 2011 - aschnell@suse.de
+
+- updated translations
+
+-------------------------------------------------------------------
+Thu Jun 09 17:52:41 CEST 2011 - aschnell@suse.de
+
+- added man-page
+
+-------------------------------------------------------------------
+Mon Jun 06 15:01:13 CEST 2011 - aschnell@suse.de
+
+- place snapshots in .snapshots directory
+- version 0.0.6
+
+-------------------------------------------------------------------
+Wed Apr 06 16:44:43 CEST 2011 - aschnell@suse.de
+
+- simplified setup
+- version 0.0.5
+
+-------------------------------------------------------------------
+Mon Apr 04 14:20:43 CEST 2011 - aschnell@suse.de
+
+- allow to ignore files during snapshot comparison
+
+-------------------------------------------------------------------
+Mon Jan 10 14:55:25 CET 2011 - aschnell@suse.de
+
+- started development (fate #303699)
+- version 0.0.1

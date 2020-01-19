@@ -1,10 +1,10 @@
 Name:		snapper
 Version:	0.1.7
-Release:	10%{?dist}
+Release:	6%{?dist}
 License:	GPLv2
 Group:		Applications/System
 BuildRequires:	boost-devel gettext libtool libxml2-devel dbus-devel
-BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.16.1
+BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.12
 BuildRequires:	libselinux-devel libacl-devel
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 Requires:	diffutils%{?_isa}
@@ -21,12 +21,6 @@ patch5:		%{name}-manpages-remove-invalid-references.patch
 patch6:		%{name}-0.2.2-add-norecovery-option-xfs.patch
 patch7:		%{name}-0.2.2-fix-acl-revert-xfs.patch
 patch8:		%{name}-add-selinux-restorecon-support.patch
-patch9:		%{name}-0.2.2-fixed-empty-pre-post-cleanup-algorithm.patch
-patch10:	%{name}-0.2.4-add-conditionals-for-btrfs-library-versions.patch
-patch11:	%{name}-0.2.2-fixed-segmentation-fault-with-dbus.patch
-patch12:	%{name}-0.2.8-move-refcounters.patch
-patch13:	%{name}-0.2.8-get-files-by-pipe.patch
-patch14:	%{name}-workaround-linkage-issue-on-some-archs.patch
 
 %description
 This package contains snapper, a tool for filesystem snapshot management.
@@ -34,7 +28,7 @@ This package contains snapper, a tool for filesystem snapshot management.
 %package libs
 Summary:	Library for filesystem snapshot management
 Group:		System Environment/Libraries
-Requires:	util-linux%{?_isa} btrfs-progs%{?_isa} >= 3.16.1 libselinux%{?_isa}
+Requires:	util-linux%{?_isa} btrfs-progs%{?_isa} >= 3.12 libselinux%{?_isa}
 Requires:	libacl%{?_isa}
 
 %description libs
@@ -70,12 +64,6 @@ A PAM module for calling snapper during user login and logout.
 %patch6 -p1
 %patch7 -p1
 %patch8 -p1
-%patch9 -p1
-%patch10 -p1
-%patch11 -p1
-%patch12 -p1
-%patch13 -p1
-%patch14 -p1
 
 %build
 aclocal
@@ -139,24 +127,6 @@ rm -f %{buildroot}/%{_libdir}/security/*.la
 %doc %{_mandir}/*/pam_snapper*.*
 
 %changelog
-* Wed Aug 05 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-10
-- patch: use pipe instead of socket pair for transfering large data
-- Resolves: #1229353
-
-* Thu Jul 30 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-9
-- patch: fix snapperd abort while passing large data over dbus
-- patch: workaround linkage issue on s390 and ppc64le
-- Resolves: #1229353
-
-* Tue Jul 07 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-8
-- patch: fix segmentation fault with dbus
-- Resolves: #1231684
-
-* Mon Sep 29 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-7
-- patch: fix empty-pre-post cleanup algorithm
-- patch: add conditionals for btrfs library versions
-- Resolves: #1071973 #1142954
-
 * Wed Feb 26 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-6
 - patch: Add norecovery option mounting XFS read-only snapshot
 - patch: Fix ACL modification failure with XFS filesystem

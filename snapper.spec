@@ -1,12 +1,13 @@
 Name:		snapper
 Version:	0.1.7
-Release:	1%{?dist}
+Release:	10%{?dist}
 License:	GPLv2
 Group:		Applications/System
 BuildRequires:	boost-devel gettext libtool libxml2-devel dbus-devel
-BuildRequires:	pam-devel libxslt docbook-style-xsl
+BuildRequires:	pam-devel libxslt docbook-style-xsl btrfs-progs-devel >= 3.16.1
+BuildRequires:	libselinux-devel libacl-devel
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
-Requires:	diffutils
+Requires:	diffutils%{?_isa}
 Summary:	Tool for filesystem snapshot management
 Url:		http://en.opensuse.org/Portal:Snapper
 
@@ -14,6 +15,18 @@ Source0:	https://github.com/openSUSE/snapper/archive/v%{version}.tar.gz#/%{name}
 patch0:		%{name}-remove-ext4-info-xml.patch
 patch1:		%{name}-rename-cron-files.patch
 patch2:		%{name}-securelibdir.patch
+patch3:		%{name}-0.1.8-adapt-to-libbtrfs-change.patch
+patch4:		%{name}-0.2.1-btrfs-fix-internal-cmp.patch
+patch5:		%{name}-manpages-remove-invalid-references.patch
+patch6:		%{name}-0.2.2-add-norecovery-option-xfs.patch
+patch7:		%{name}-0.2.2-fix-acl-revert-xfs.patch
+patch8:		%{name}-add-selinux-restorecon-support.patch
+patch9:		%{name}-0.2.2-fixed-empty-pre-post-cleanup-algorithm.patch
+patch10:	%{name}-0.2.4-add-conditionals-for-btrfs-library-versions.patch
+patch11:	%{name}-0.2.2-fixed-segmentation-fault-with-dbus.patch
+patch12:	%{name}-0.2.8-move-refcounters.patch
+patch13:	%{name}-0.2.8-get-files-by-pipe.patch
+patch14:	%{name}-workaround-linkage-issue-on-some-archs.patch
 
 %description
 This package contains snapper, a tool for filesystem snapshot management.
@@ -21,7 +34,8 @@ This package contains snapper, a tool for filesystem snapshot management.
 %package libs
 Summary:	Library for filesystem snapshot management
 Group:		System Environment/Libraries
-Requires:	util-linux
+Requires:	util-linux%{?_isa} btrfs-progs%{?_isa} >= 3.16.1 libselinux%{?_isa}
+Requires:	libacl%{?_isa}
 
 %description libs
 This package contains the snapper shared library
@@ -38,9 +52,9 @@ This package contains header files and documentation for developing with
 snapper.
 
 %package -n pam_snapper
-Requires:       %{name}%{?_isa} = %version-%{release}
-Requires:       pam%{?_isa}
-Summary:        PAM module for calling snapper
+Requires:	%{name}%{?_isa} = %version-%{release}
+Requires:	pam%{?_isa}
+Summary:	PAM module for calling snapper
 
 %description -n pam_snapper
 A PAM module for calling snapper during user login and logout.
@@ -50,6 +64,18 @@ A PAM module for calling snapper during user login and logout.
 %patch0 -p1
 %patch1 -p1
 %patch2 -p1
+%patch3 -p1
+%patch4 -p1
+%patch5 -p1
+%patch6 -p1
+%patch7 -p1
+%patch8 -p1
+%patch9 -p1
+%patch10 -p1
+%patch11 -p1
+%patch12 -p1
+%patch13 -p1
+%patch14 -p1
 
 %build
 aclocal
@@ -59,7 +85,7 @@ automake --add-missing --copy
 autoconf
 # NOTE: --disable-ext4 option removes support for ext4 internal snapshots since the feature
 # never made it into upstream kernel
-%configure --disable-silent-rules --disable-ext4 --docdir=%{_defaultdocdir}/%{name}-%{version} --disable-zypp --enable-xattrs
+%configure --disable-silent-rules --disable-ext4 --docdir=%{_defaultdocdir}/%{name}-%{version} --disable-zypp --enable-selinux
 #NOTE: avoid 'unused-direct-shlib-dependency' warning in rpmlint checks
 sed -i -e 's! -shared ! -Wl,--as-needed\0!g' libtool
 make %{?_smp_mflags}
@@ -113,6 +139,46 @@ rm -f %{buildroot}/%{_libdir}/security/*.la
 %doc %{_mandir}/*/pam_snapper*.*
 
 %changelog
+* Wed Aug 05 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-10
+- patch: use pipe instead of socket pair for transfering large data
+- Resolves: #1229353
+
+* Thu Jul 30 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-9
+- patch: fix snapperd abort while passing large data over dbus
+- patch: workaround linkage issue on s390 and ppc64le
+- Resolves: #1229353
+
+* Tue Jul 07 2015 Ondrej Kozina <okozina@redhat.com> - 0.1.7-8
+- patch: fix segmentation fault with dbus
+- Resolves: #1231684
+
+* Mon Sep 29 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-7
+- patch: fix empty-pre-post cleanup algorithm
+- patch: add conditionals for btrfs library versions
+- Resolves: #1071973 #1142954
+
+* Wed Feb 26 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-6
+- patch: Add norecovery option mounting XFS read-only snapshot
+- patch: Fix ACL modification failure with XFS filesystem
+- patch: Sync SELinux context of .snapshots subvolume (btrfs only)
+- Resolves: #1064111, #1065969, #1069312
+
+* Tue Feb 11 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-5
+- patch: Fix failure in invoking btrfs internal comparison of subvolumes
+- patch: Remove references to missing programs from man pages
+- Resolves: #1060806, #1063844
+
+* Fri Jan 24 2014 Daniel Mach <dmach@redhat.com> - 0.1.7-4
+- Mass rebuild 2014-01-24
+
+* Fri Jan 24 2014 Ondrej Kozina <okozina@redhat.com> - 0.1.7-3
+- enable btrfs compare using send/receive in libbtrfs
+- patch: adapt sources to change in libtrfs API (btrfs_read_and_process_send_stream)
+- Resolves: #1055579
+
+* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 0.1.7-2
+- Mass rebuild 2013-12-27
+
 * Tue Oct 15 2013 Ondrej Kozina <okozina@redhat.com> - 0.1.7-1
 - Update to snapper 0.1.7
 - Resolves: #995102

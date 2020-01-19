@@ -1,0 +1,13 @@
+--- a/doc/snapper.xml.in	2014-02-11 16:41:18.953061342 +0100
++++ b/doc/snapper.xml.in	2014-02-11 16:43:48.816287132 +0100
+@@ -96,10 +96,6 @@
+ 	<listitem>
+ 	  <para>A cron-job creates hourly snapshots.</para>
+ 	</listitem>
+-	<listitem>
+-	  <para>Certain programs like YaST and zypper create pre/post
+-	  snapshot pairs when modifying the system.</para>
+-	</listitem>
+       </itemizedlist>
+     </refsect2>
+ 

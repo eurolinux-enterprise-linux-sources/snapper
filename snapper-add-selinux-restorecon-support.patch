@@ -1,0 +1,188 @@
+diff -rupN snapper-0.1.7.old/configure.ac snapper-0.1.7/configure.ac
+--- snapper-0.1.7.old/configure.ac	2014-02-26 13:26:15.606603048 +0100
++++ snapper-0.1.7/configure.ac	2014-02-26 13:27:17.415318613 +0100
+@@ -116,6 +116,14 @@ AC_ARG_ENABLE([pam], AC_HELP_STRING([--d
+                 [with_pam=$enableval],[with_pam=yes])
+ AM_CONDITIONAL(HAVE_PAM, [test "x$with_pam" = "xyes"])
+ 
++AC_ARG_ENABLE([selinux], AC_HELP_STRING([--enable-selinux],[Enable support for SELinux LSM]),
++		[with_selinux=$enableval],[with_selinux=no])
++
++if test "x$with_selinux" = "xyes"; then
++	AC_DEFINE(ENABLE_SELINUX, 1, [Enable SELinux support])
++	AC_CHECK_LIB(selinux, is_selinux_enabled)
++fi
++
+ PKG_CHECK_MODULES(DBUS, dbus-1)
+ 
+ AC_SUBST(VERSION)
+diff -rupN snapper-0.1.7.old/snapper/Btrfs.cc snapper-0.1.7/snapper/Btrfs.cc
+--- snapper-0.1.7.old/snapper/Btrfs.cc	2014-02-26 13:26:49.258448202 +0100
++++ snapper-0.1.7/snapper/Btrfs.cc	2014-02-26 13:27:17.416318605 +0100
+@@ -84,6 +84,8 @@ namespace snapper
+ 	struct stat stat;
+ 	if (x.stat(&stat, 0) == 0)
+ 	    x.chmod(stat.st_mode & ~0027, 0);
++	if (!x.restorecon())
++	    y2war("couldn't restore context on: '" << x.fullname() << "'");
+     }
+ 
+ 
+diff -rupN snapper-0.1.7.old/snapper/FileUtils.cc snapper-0.1.7/snapper/FileUtils.cc
+--- snapper-0.1.7.old/snapper/FileUtils.cc	2014-02-26 13:26:15.604603057 +0100
++++ snapper-0.1.7/snapper/FileUtils.cc	2014-02-26 13:27:17.416318605 +0100
+@@ -35,6 +35,9 @@
+ #include <stdlib.h>
+ #include <assert.h>
+ #include <algorithm>
++#ifdef ENABLE_SELINUX
++#include <selinux/selinux.h>
++#endif
+ 
+ #include "snapper/FileUtils.h"
+ #include "snapper/AppUtil.h"
+@@ -552,6 +555,111 @@ namespace snapper
+     }
+ 
+ 
++    bool
++    SDir::restorecon(const string& name) const
++    {
++#ifdef ENABLE_SELINUX
++	assert(name.find("/") == string::npos);
++	assert(name != "..");
++
++	bool ret = true;
++
++	if (is_selinux_enabled() > 0)
++	{
++	    struct stat buf;
++
++	    security_context_t sec_con_src = NULL;
++	    security_context_t sec_con_tgt = NULL;
++
++	    int fd = ::openat(dirfd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_NOATIME
++			      | O_NONBLOCK | O_CLOEXEC);
++	    if (fd < 0)
++	    {
++		// symlink, detached dev node?
++		if (errno != ELOOP && errno != ENXIO && errno != EWOULDBLOCK)
++		{
++		    y2err("open failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    return false;
++		}
++
++		boost::lock_guard<boost::mutex> lock(cwd_mutex);
++
++		if (fchdir(dirfd) < 0)
++		{
++		    y2err("fchdir failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    return false;
++		}
++
++		if  (lstat(name.c_str(), &buf) < 0)
++		{
++		    y2err("stat failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    chdir("/");
++		    return false;
++		}
++
++		if (matchpathcon(fullname(name).c_str(), buf.st_mode, &sec_con_tgt))
++		{
++		    y2err("matchpathcon(\"" << fullname(name) << "\") failed");
++		    chdir("/");
++		    return false;
++		}
++
++		if (lgetfilecon(name.c_str(), &sec_con_src) || selinux_file_context_cmp(sec_con_src, sec_con_tgt))
++		{
++		    y2deb("restoring SELinux context for subvolume");
++		    if (lsetfilecon(name.c_str(), sec_con_tgt))
++		    {
++			y2err("lsetfilecon failed errno: " << errno << " (" << stringerror(errno) << ")");
++			ret = false;
++		    }
++		}
++
++		chdir("/");
++	    }
++	    else
++	    {
++		if (fstat(fd, &buf) < 0)
++		{
++		    y2err("fstat failed errno: " << errno << " (" << stringerror(errno) << ")");
++		    ::close(fd);
++		    return false;
++		}
++
++		if (matchpathcon(fullname(name).c_str(), buf.st_mode, &sec_con_tgt))
++		{
++		    y2err("matchpathcon(\"" << fullname(name) << "\") failed");
++		    ::close(fd);
++		    return false;
++		}
++
++		if (fgetfilecon(fd, &sec_con_src) || selinux_file_context_cmp(sec_con_src, sec_con_tgt))
++		{
++		    y2deb("restoring SELinux context for subvolume");
++		    if (fsetfilecon(fd, sec_con_tgt))
++		    {
++			y2err("fsetfilecon failed errno: " << errno << " (" << stringerror(errno) << ")");
++			ret = false;
++		    }
++		}
++
++		::close(fd);
++	    }
++
++	    freecon(sec_con_src);
++	    freecon(sec_con_tgt);
++	}
++	else
++	{
++	    y2deb("selinux disabled");
++	}
++
++	return ret;
++#else
++	return true;
++#endif
++    }
++
++
+     SFile::SFile(const SDir& dir, const string& name)
+ 	: dir(dir), name(name)
+     {
+@@ -615,4 +723,11 @@ namespace snapper
+ 	return dir.getxattr(SFile::name, name, value, size);
+     }
+ 
++
++    bool
++    SFile::restorecon() const
++    {
++	return dir.restorecon(name);
++    }
++
+ }
+diff -rupN snapper-0.1.7.old/snapper/FileUtils.h snapper-0.1.7/snapper/FileUtils.h
+--- snapper-0.1.7.old/snapper/FileUtils.h	2014-02-26 13:26:15.604603057 +0100
++++ snapper-0.1.7/snapper/FileUtils.h	2014-02-26 13:27:17.416318605 +0100
+@@ -100,6 +100,8 @@ namespace snapper
+ 		   const string& mount_data) const;
+ 	bool umount(const string& mount_point) const;
+ 
++	bool restorecon(const string& name) const;
++
+     private:
+ 
+ 	XaAttrsStatus xastatus;
+@@ -133,6 +135,8 @@ namespace snapper
+ 	ssize_t listxattr(char* list, size_t size) const;
+ 	ssize_t getxattr(const char* name, void* value, size_t size) const;
+ 
++	bool restorecon() const;
++
+     private:
+ 
+ 	const SDir& dir;

@@ -1,0 +1,225 @@
+From 99fe73e35321449a931a0698d02b168b63cf8b71 Mon Sep 17 00:00:00 2001
+From: Arvin Schnell <aschnell@suse.de>
+Date: Thu, 20 Feb 2014 15:16:47 +0100
+Subject: [PATCH] - fixed segmentation fault with DBus (bnc#860119)
+
+---
+ dbus/DBusMainLoop.cc    | 105 +++++++++++++++++++++++++++---------------------
+ dbus/DBusMainLoop.h     |  12 ++++--
+ package/snapper.changes |   5 +++
+ 3 files changed, 73 insertions(+), 49 deletions(-)
+
+diff --git a/dbus/DBusMainLoop.cc b/dbus/DBusMainLoop.cc
+index f7e4561..cd63d25 100644
+--- a/dbus/DBusMainLoop.cc
++++ b/dbus/DBusMainLoop.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2012 Novell, Inc.
++ * Copyright (c) [2012-2014] Novell, Inc.
+  *
+  * All Rights Reserved.
+  *
+@@ -30,6 +30,28 @@
+ namespace DBus
+ {
+ 
++    MainLoop::Watch::Watch(DBusWatch* dbus_watch)
++	: dbus_watch(dbus_watch), enabled(false), fd(-1), events(0)
++    {
++	enabled = dbus_watch_get_enabled(dbus_watch);
++	fd = dbus_watch_get_unix_fd(dbus_watch);
++
++	unsigned int flags = dbus_watch_get_flags(dbus_watch);
++	if (flags & DBUS_WATCH_READABLE)
++	    events |= POLLIN;
++	if (flags & DBUS_WATCH_WRITABLE)
++	    events |= POLLOUT;
++    }
++
++
++    MainLoop::Timeout::Timeout(DBusTimeout* dbus_timeout)
++	: dbus_timeout(dbus_timeout), enabled(false), interval(0)
++    {
++	enabled = dbus_timeout_get_enabled(dbus_timeout);
++	interval = dbus_timeout_get_interval(dbus_timeout);
++    }
++
++
+     MainLoop::MainLoop(DBusBusType type)
+ 	: Connection(type), idle_timeout(-1)
+     {
+@@ -100,36 +122,37 @@ namespace DBus
+ 
+ 	    periodic();
+ 
+-	    for (vector<struct pollfd>::const_iterator it2 = pollfds.begin(); it2 != pollfds.end(); ++it2)
++	    for (vector<struct pollfd>::const_iterator it1 = pollfds.begin(); it1 != pollfds.end(); ++it1)
+ 	    {
+-		if (it2->fd == wakeup_pipe[0] && (it2->revents & POLLIN))
++		if (it1->fd == wakeup_pipe[0])
+ 		{
+-		    char arbitrary;
+-		    read(wakeup_pipe[0], &arbitrary, 1);
++		    if (it1->revents & POLLIN)
++		    {
++			char arbitrary;
++			read(wakeup_pipe[0], &arbitrary, 1);
++		    }
+ 		}
+-	    }
+-
+-	    for (vector<Watch>::const_iterator it = watches.begin(); it != watches.end(); ++it)
+-	    {
+-		if (it->enabled)
++		else
+ 		{
+-		    for (vector<struct pollfd>::const_iterator it2 = pollfds.begin(); it2 != pollfds.end(); ++it2)
+-		    {
+-			if (it2->fd == it->fd)
+-			{
+-			    unsigned int flags = 0;
++		    unsigned int flags = 0;
+ 
+-			    if (it2->revents & POLLIN)
+-				flags |= DBUS_WATCH_READABLE;
++		    if (it1->revents & POLLIN)
++			flags |= DBUS_WATCH_READABLE;
+ 
+-			    if (it2->revents & POLLOUT)
+-				flags |= DBUS_WATCH_WRITABLE;
++		    if (it1->revents & POLLOUT)
++			flags |= DBUS_WATCH_WRITABLE;
+ 
+-			    if (flags != 0)
+-			    {
+-				boost::lock_guard<boost::mutex> lock(mutex);
+-				dbus_watch_handle(it->dbus_watch, flags);
+-			    }
++		    if (flags != 0)
++		    {
++			// Do not iterate over watches here since calling dbus_watch_handle() can
++			// trigger a remove_watch() callback, thus invalidating the iterator.
++			// Instead always search for the watch.
++
++			vector<Watch>::const_iterator it2 = find_enabled_watch(it1->fd, it1->events);
++			if (it2 != watches.end())
++			{
++			    boost::lock_guard<boost::mutex> lock(mutex);
++			    dbus_watch_handle(it2->dbus_watch, flags);
+ 			}
+ 		    }
+ 		}
+@@ -178,6 +201,17 @@ namespace DBus
+     }
+ 
+ 
++    vector<MainLoop::Watch>::iterator
++    MainLoop::find_enabled_watch(int fd, int events)
++    {
++	for (vector<Watch>::iterator it = watches.begin(); it != watches.end(); ++it)
++	    if (it->enabled && it->fd == fd && it->events == events)
++		return it;
++
++	return watches.end();
++    }
++
++
+     vector<MainLoop::Timeout>::iterator
+     MainLoop::find_timeout(DBusTimeout* dbus_timeout)
+     {
+@@ -192,22 +226,9 @@ namespace DBus
+     dbus_bool_t
+     MainLoop::add_watch(DBusWatch* dbus_watch, void* data)
+     {
+-	Watch tmp;
+-	tmp.enabled = dbus_watch_get_enabled(dbus_watch);
+-	tmp.fd = dbus_watch_get_unix_fd(dbus_watch);
+-	tmp.flags = dbus_watch_get_flags(dbus_watch);
+-
+-	tmp.events = 0;
+-	if (tmp.flags & DBUS_WATCH_READABLE)
+-	    tmp.events |= POLLIN;
+-	if (tmp.flags & DBUS_WATCH_WRITABLE)
+-	    tmp.events |= POLLOUT;
+-
+-	tmp.dbus_watch = dbus_watch;
+-
++	Watch tmp(dbus_watch);
+ 	MainLoop* s = static_cast<MainLoop*>(data);
+ 	s->watches.push_back(tmp);
+-
+ 	return true;
+     }
+ 
+@@ -233,14 +254,9 @@ namespace DBus
+     dbus_bool_t
+     MainLoop::add_timeout(DBusTimeout* dbus_timeout, void* data)
+     {
+-	Timeout tmp;
+-	tmp.enabled = dbus_timeout_get_enabled(dbus_timeout);
+-	tmp.interval = dbus_timeout_get_interval(dbus_timeout);
+-	tmp.dbus_timeout = dbus_timeout;
+-
++	Timeout tmp(dbus_timeout);
+ 	MainLoop* s = static_cast<MainLoop*>(data);
+ 	s->timeouts.push_back(tmp);
+-
+ 	return true;
+     }
+ 
+@@ -249,7 +265,6 @@ namespace DBus
+     MainLoop::remove_timeout(DBusTimeout* dbus_timeout, void* data)
+     {
+ 	MainLoop* s = static_cast<MainLoop*>(data);
+-
+ 	vector<Timeout>::iterator it = s->find_timeout(dbus_timeout);
+ 	s->timeouts.erase(it);
+     }
+diff --git a/dbus/DBusMainLoop.h b/dbus/DBusMainLoop.h
+index ecf7717..5ce66f0 100644
+--- a/dbus/DBusMainLoop.h
++++ b/dbus/DBusMainLoop.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2012 Novell, Inc.
++ * Copyright (c) [2012-2014] Novell, Inc.
+  *
+  * All Rights Reserved.
+  *
+@@ -57,18 +57,21 @@ namespace DBus
+ 
+ 	struct Watch
+ 	{
++	    Watch(DBusWatch* dbus_watch);
++
++	    DBusWatch* dbus_watch;
+ 	    bool enabled;
+ 	    int fd;
+-	    unsigned int flags;
+ 	    int events;
+-	    DBusWatch* dbus_watch;
+ 	};
+ 
+ 	struct Timeout
+ 	{
++	    Timeout(DBusTimeout* dbus_timeout);
++
++	    DBusTimeout* dbus_timeout;
+ 	    bool enabled;
+ 	    int interval;
+-	    DBusTimeout* dbus_timeout;
+ 	};
+ 
+ 	vector<Watch> watches;
+@@ -76,6 +79,7 @@ namespace DBus
+ 	int wakeup_pipe[2];
+ 
+ 	vector<Watch>::iterator find_watch(DBusWatch* dbus_watch);
++	vector<Watch>::iterator find_enabled_watch(int fd, int events);
+ 	vector<Timeout>::iterator find_timeout(DBusTimeout* dbus_timeout);
+ 
+ 	static dbus_bool_t add_watch(DBusWatch* dbus_watch, void* data);
+-- 
+2.4.3
+
